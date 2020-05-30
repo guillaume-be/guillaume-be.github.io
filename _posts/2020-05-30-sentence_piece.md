@@ -4,16 +4,16 @@ title: "A Rust SentencePiece implementation"
 author: "Guillaume"
 ---
 
-# Abtract
+# Abstract
 
-Tokenization into words or sub-word units is a key component of Natural Language Processing. While often taken for granted by data science practitioners, modern tokenization algorithms such as Byte Pair Encoding ([Sennrich et al., 2015](https://arxiv.org/abs/1508.07909)), WordPiece or SentencePiece ([Kudo et al., 2018](https://arxiv.org/abs/1808.06226)) can have a significant impact on the performance of the entire pipeline. These three algorithm have in common the segmentation of rare words into sub-tokens in order to limit the size of the resulting vocabulary, which in turn results in more compact embedding matrices, reduced memory footprint and better generalization. These would for example split the word `unaffable` into `[un, ##aff, ##able]` where the prefix `un` could share its representation with other negating prefixes for other words, for example `[un, ##expected]`. 
+Tokenization into words or sub-word units is a key component of Natural Language Processing. While often taken for granted by data science practitioners, modern tokenization algorithms such as Byte Pair Encoding ([Sennrich et al., 2015](https://arxiv.org/abs/1508.07909)), WordPiece or SentencePiece ([Kudo et al., 2018](https://arxiv.org/abs/1808.06226)) can have a significant impact on the performance of the entire pipeline. These three algorithms have in common the segmentation of rare words into sub-tokens in order to limit the size of the resulting vocabulary, which in turn results in more compact embedding matrices, reduced memory footprint and better generalization. These would for example split the word `unaffable` into `[un, ##aff, ##able]` where the prefix `un` could share its representation with other negating prefixes for other words, for example `[un, ##expected]`. 
 
 I believe that familiarity with the implementation details, benefits and limitations of these algorithms is key to understanding the same for the end-to-end models using these tokenizers.
 
  While information on the popular Byte Pair Encoding (BPE) is [available](https://web.stanford.edu/class/cs224n/slides/cs224n-2019-lecture12-subwords.pdf) with detailed information on the encoding algorithms, I felt working examples (with acceptable real world performance) of the sentence piece unigram encoding algorithm were missing. Not meant at being a replacement for the [reference article](https://arxiv.org/abs/1804.10959),
   this article aims at providing an illustrated walk-through the Sentence Piece unigram model encoding algorithm  via a working and reasonably optimized implementation in Rust. To do so, the focus will be on a practical implementation techniques that can be used to make sentence piece a high-throughput and robust tokenization tool. 
 
-SentencePiece refers to both a probabilistic word segmentation algorithm and a library, of which the code is [open-sourced](https://github.com/google/sentencepiece) and remains the reference implementation. However, the scale of the project (and potential lack of familiarity with C++) can make a deep-dive through the source a daunting task for the interested data scientist willing to better understand the algorithm. The Rust programming language offers a number of features making it a great language for natural language processing (robust and modern string handling, memory safety, effective multi-threading application design). Another advantage of the Rust language is its speed and readability, making it the ideal language for this illustrated reference.
+SentencePiece refers to both a probabilistic word segmentation algorithm and a library, of which the code is [open-sourced](https://github.com/google/sentencepiece) and remains the reference implementation. However, the scale of the project (and potential lack of familiarity with C++) can make a deep-dive through the source code a daunting task for the interested data scientist willing to better understand the algorithm. The Rust programming language offers a number of features making it a great language for natural language processing (robust and modern string handling, memory safety, effective multi-threading application design). Another advantage of the Rust language is its speed and readability, making it the ideal language for this illustrated reference.
 
 # Byte Pair Encoding, Wordpiece, Unigram models
 
@@ -22,9 +22,9 @@ This article does not aim at providing an extensive reference for three of the m
 ## Training
 
 While in surface all 3 algorithms (Byte Pair Encoding, WordPiece and SentencePiece) seem to be aiming at the same objective (splitting of words into sub-tokens and a fixed-size vocabulary), their implementation differs significantly:
-- Byte pair Encoding uses a greedy bottom-up aggregation model that will merge the most common pairs of characters (or byte depending on the implementation). It starts by decomposing the input into characters (alternatively bytes) and iteratively merges the most commonly occuring adjacent character (byte) pairs. As such it is a deterministic algorithm that is solely based on the frequency of a given pair.
+- Byte pair Encoding uses a greedy bottom-up aggregation model that will merge the most common pairs of characters (or byte depending on the implementation). It starts by decomposing the input into characters (alternatively bytes) and iteratively merges the most commonly occurring adjacent character (byte) pairs. As such it is a deterministic algorithm that is solely based on the frequency of a given pair.
 - WordPiece is a variation of Byte Pair Encoding that will choose the pair of symbols to merge not based on their frequency, but based on the likelihood improvement of the resulting merged token in a unigram language model compared to the individual tokens. 
-- Finally, the SentencePiece Unigram model aims at maximizing the likelihood of a unigram language model by starting from a large seed vocabulary (generated for example from the ([Suffix Array algorithm, Nong et al.](https://ieeexplore.ieee.org/document/4976463)) which is pruned iteratively using the Expectation Maximization algorithm. A detailed description of the training mechanism of the Unigram model is beyond the scope of this article, and teh focus will rather be on the encoding mechanism.
+- Finally, the SentencePiece unigram model aims at maximizing the likelihood of a unigram language model by starting from a large seed vocabulary (generated for example from the ([Suffix Array algorithm, Nong et al.](https://ieeexplore.ieee.org/document/4976463)) which is pruned iteratively using the Expectation Maximization algorithm. A detailed description of the training mechanism of the unigram model is beyond the scope of this article, and the focus will rather be on the encoding mechanism.
 
 ## Encoding
 
@@ -108,7 +108,7 @@ By construction, the forward pass provides the token with the highest likelihood
 
 ![Forward pass example](../assets/sentencepiece/spiece2.png "backward pass example")
 
-The following will two implementations of the algorithm in Rust.
+The following will walk through two implementations of the algorithm in Rust.
 
 ## First implementation
 
@@ -137,7 +137,7 @@ One potential implementation of the `identify_best_token_ending_at` method is to
     End for
 ~~~
 
-The first step is to define a SentencePiece model holding the pre-trained vocabulary and tokens log-likelohood:
+The first step is to define a SentencePiece model holding the pre-trained vocabulary and tokens log-likelihood:
 
 ```rust
 pub struct SentencePieceModel {
