@@ -6,65 +6,47 @@ author: "Guillaume"
 
 # Abstract
 
-Tokenization into words or sub-word units is a key component of Natural Language Processing. While often taken for granted by data science practitioners, modern tokenization algorithms such as Byte Pair Encoding ([Sennrich et al., 2015](https://arxiv.org/abs/1508.07909)), WordPiece or SentencePiece ([Kudo et al., 2018](https://arxiv.org/abs/1808.06226)) can have a significant impact on the performance of the entire pipeline. These three algorithms have in common the segmentation of rare words into sub-tokens in order to limit the size of the resulting vocabulary, which in turn results in more compact embedding matrices, reduced memory footprint and better generalization. These would for example split the word `unaffable` into `[un, ##aff, ##able]` where the prefix `un` could share its representation with other negating prefixes for other words, for example `[un, ##expected]`. 
+Tokenization into words or sub-word units is a key component of Natural Language Processing pipeline. Modern approaches such as Byte Pair Encoding ([Sennrich et al., 2015](https://arxiv.org/abs/1508.07909)), WordPiece or SentencePiece ([Kudo et al., 2018](https://arxiv.org/abs/1808.06226)) segment rare words into sub-tokens in order to limit the size of the resulting vocabulary, which in turn results in more compact embedding matrices, reduced memory footprint and better generalization. These would for example split the word `unaffable` into `[un, ##aff, ##able]` where the prefix `un` could share its representation with other negating prefixes for other words, for example `[un, ##expected]`.
 
-I believe that familiarity with the implementation details, benefits and limitations of these algorithms is key to understanding the same for the end-to-end models using these tokenizers.
+I believe that familiarity with the implementation details, benefits and limitations of these algorithms is key to understanding the same for the end-to-end models using these tokenizers. For example, while Byte Pair Encoding is a morphological tokenizer agglomerating common character pairs into subtokens, the SentencePiece unigram tokenizer is a statistical model that uses a unigram language model to return the statistically most likely segmentation of an input. While information on the popular Byte Pair Encoding (BPE) is [available](https://web.stanford.edu/class/cs224n/slides/cs224n-2019-lecture12-subwords.pdf) with detailed information on the encoding algorithms, I felt working examples (with acceptable real world performance) of the sentence piece unigram encoding algorithm were missing. Not meant at being a replacement for the [reference article](https://arxiv.org/abs/1804.10959), this article aims at providing an illustrated walk-through the Sentence Piece unigram model encoding algorithm. However, the scale of the project (and potential lack of familiarity with C++) can make a deep-dive through the source code a daunting task for the interested data scientist willing to better understand the algorithm.
+ 
+ [Rust](https://www.rust-lang.org) has been shown to be a language that is adequate for high-performance tokenization (for example in my [rust-tokenizers](https://crates.io/crates/rust_tokenizers) project or Hugging Face's [tokenizers](https://crates.io/crates/tokenizers)). The Rust programming language offers a number of features making it a great language for natural language processing (robust and modern string handling, memory safety, effective multi-threading application design, speed and readability). This article provides two example implementations for the SentencePiece ending step in Rust. Importantly, I will show that the raw performance of a language should not replace careful design of the algorithms. This article proposes two implementations that are an order of magnitude apart in terms of execution speed, with the fastest being comparable to the reference C++ code. With both implementation fitting in around 150 lines of code, they make a good learning reference for both Rust and the SentencePiece algorithm itself. 
 
- While information on the popular Byte Pair Encoding (BPE) is [available](https://web.stanford.edu/class/cs224n/slides/cs224n-2019-lecture12-subwords.pdf) with detailed information on the encoding algorithms, I felt working examples (with acceptable real world performance) of the sentence piece unigram encoding algorithm were missing. Not meant at being a replacement for the [reference article](https://arxiv.org/abs/1804.10959),
-  this article aims at providing an illustrated walk-through the Sentence Piece unigram model encoding algorithm  via a working and reasonably optimized implementation in Rust. To do so, the focus will be on a practical implementation techniques that can be used to make sentence piece a high-throughput and robust tokenization tool. 
+# An overview of the SentencePiece unigram model
 
-SentencePiece refers to both a probabilistic word segmentation algorithm and a library, of which the code is [open-sourced](https://github.com/google/sentencepiece) and remains the reference implementation. However, the scale of the project (and potential lack of familiarity with C++) can make a deep-dive through the source code a daunting task for the interested data scientist willing to better understand the algorithm. The Rust programming language offers a number of features making it a great language for natural language processing (robust and modern string handling, memory safety, effective multi-threading application design). Another advantage of the Rust language is its speed and readability, making it the ideal language for this illustrated reference.
+SentencePiece refers to both a probabilistic word segmentation algorithm (usually the unigram model) and a library (implemented in C++). The SentencePiece unigram model decomposes an input into a sequence of tokens that would have the highest likelihood (probability) to occur in an unigram language model, i.e. the decomposition that maximizes the product of the sub-tokens probability (or more conveniently the sum of their log probability). 
 
-# Byte Pair Encoding, Wordpiece, Unigram models
+Mathematically, the objective of the tokenization is to identify the subtokens $$(x_1, x_2, \dots, x_n)$$  from the set of segmentation candidates $$S(V)$$ for an input $$X$$ such as
+$$\newcommand{\argmax}{\arg\!\max}$$
 
-This article does not aim at providing an extensive reference for three of the most popular tokenization algorithms in modern NLP. However, a quick introduction is required to provide an adequate context to appreciate the challenges of an effective SentencePiece unigram implementation.
+$$P(X) = \prod\limits_{i=1}^{M} P(x_i)$$
+
+$$(x_1, x_2, \dots, x_n) = \argmax_{x \in S(V)} P(X)$$
+
+The individual token probabilities are built such as:
+
+$$\sum_{Vocabulary}P(x) = 1$$
+
+(from [Kudo et al., 2018](https://arxiv.org/abs/1808.06226)). Note that log probabilities are usually used rather than the direct probabilities so that the most likely sequence can be derived from the sum of log probabilities rather than the product of probabilities.
+
+The algorithm consists of two macro steps: the training on a large corpus and the encoding of sentences at inference time. A detailed description of the training mechanism of the unigram model is beyond the scope of this article, and the focus will rather be on the encoding mechanism.
 
 ## Training
 
-While in surface all 3 algorithms (Byte Pair Encoding, WordPiece and SentencePiece) seem to be aiming at the same objective (splitting of words into sub-tokens and a fixed-size vocabulary), their implementation differs significantly:
-- Byte pair Encoding uses a greedy bottom-up aggregation model that will merge the most common pairs of characters (or byte depending on the implementation). It starts by decomposing the input into characters (alternatively bytes) and iteratively merges the most commonly occurring adjacent character (byte) pairs. As such it is a deterministic algorithm that is solely based on the frequency of a given pair.
-- WordPiece is a variation of Byte Pair Encoding that will choose the pair of symbols to merge not based on their frequency, but based on the likelihood improvement of the resulting merged token in a unigram language model compared to the individual tokens. 
-- Finally, the SentencePiece unigram model aims at maximizing the likelihood of a unigram language model by starting from a large seed vocabulary (generated for example from the ([Suffix Array algorithm, Nong et al.](https://ieeexplore.ieee.org/document/4976463)) which is pruned iteratively using the Expectation Maximization algorithm. A detailed description of the training mechanism of the unigram model is beyond the scope of this article, and the focus will rather be on the encoding mechanism.
+The SentencePiece unigram model aims at maximizing the likelihood of a unigram language model by starting f which is pruned iteratively using the Expectation Maximization algorithm. 
+
+ The SentencePiece tokenization aims at finding the tokenization that maximizes the likelihood of a language model trained using this tokenization. Because these depend on each other, the Expectation Maximization algorithm is used to build this tokenization model with the following steps:
+ 
+1. Initiate a reasonably large seed vocabulary (generated for example from the ([Suffix Array algorithm, Nong et al.](https://ieeexplore.ieee.org/document/4976463)) from a training corpus. Define a desired vocabulary size that is smaller than the initial vocabulary (*note: this differs from BPE training where the vocabulary grows until it reaches the target size!*)
+2. Repeat the following Expectation Maximization steps until convergence:
+    1. Estimate the probability of each vocabulary token using frequency counts in the training corpus
+    2. Use this probability to tokenize the text using the encoding algirthm described in the following section ([Viterbi decoding algorithm](https://en.wikipedia.org/wiki/Viterbi_algorithm)).
+    3. Compute the loss for every vocabulary token, loss being the impact of dropping said token from the vocabulary on the overall likelihood $$\mathcal{L}$$.
+    4. Prune the vocabulary by keeping the top $$x\% (e.g. 80\%)$$) tokens with the lowest loss. In order to eliminate the risk of an out-of-vocabulary character item, single characters are usually excluded from this pruning step.
 
 ## Encoding
 
-These three algorithms also differ when used to encode a given text input (referred to in the following as *encoding*):
-
-### Byte Pair Encoding 
-
-Byte Pair Encoding follows the same procedure as for training and agglomerates the most common byte-pairs. The frequency is however not coming from the text input but from a "merges" files containing a list of most frequent merges sorted by frequency in the training set.
-~~~
-1. Split the input into characters (or bytes)
-2. Loop:
-    Create a list of merged symbols from 2 adjacent symbols
-    Look up the merged symbol frequency in a "merges file"
-    If at least one of them is found:
-        merge the top symbols into one symbol
-    End if
-    Repeat until none of the merged symbols are found in "merges file"
-~~~
-The first step will generate up to `N-1` potential merges from an input with `N` characters. One of these will be merged and the process is repeated with `N-2` look-ups. The complexity of the BPE algorithm being `O(N²)` in the worst case, it means that the text is usually pre-tokenized into individual words (whitespace/punctuation tokenization) before splitting into pieces using BPE. This poses a challenges for languages without clear word separators such as Chinese.
-
-
-### WordPiece
-WordPiece encoding follows a greedy procedure that attempts to find the longest prefix token in a given word that can be found in the vocabulary. This possibly leads to the prefix token being equal to the entire word. When the longest prefix has been found, it is added to the list of subtokens, and the process is repeated for the remaining part of the word:
-~~~
-1. Set substring = input
-2. While substring is not empty:
-        Set end_position = len(substring)
-        While substring[:end_position] not in Vocabulary:
-            end_position = end_position - 1 (make prefix 1 character shorter)
-        End while
-        Append substring[:end_position] to tokens
-        substring = substring[end_position:] (repeat process after removing the prefix)
-    End while
-~~~
-It can be seen that in the worst case where none of the sub-elements of a `N`-length string are in a vocabulary, `N-1` vocabulary look-ups will be made, the first character is removed and the process is repeated, potentially looping through the entire substring again. For this reason, a pre-tokenization is usually used for WordPiece tokenization using whitespaces and punctuation.
-
-### SentencePiece (Unigram) model
-The process is different for the Unigram model used by SentencePiece. In this case the probability of a given sub-token to occur is provided in the model. The objective is to find the input decomposition that would have the highest likelihood (probability) to occur, i.e. the decomposition that maximizes the product of the sub-tokens probability (or more conveniently the sum of their log probability). A greedy decoding similar to the Byte pair Encoding or WordPiece would possibly lead to a possibly sub-optimal overall sequence probability, and the [Viterbi decoding algorithm](https://en.wikipedia.org/wiki/Viterbi_algorithm) is used.
-
-The Viterbi algorithm consists of 2 macro steps: a forward step (where the possible sub-tokens are identified) and a backward step (where the most likely decoding sequence is identified). These steps are described in detail in this [excellent article](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html). 
+Encoding is used during the training maximization step of EM and at inference in order to encode a new input text. The focus of this article will be on the implementation of this encoding step that is used at inference time. The encoding is done using the [Viterbi decoding algorithm](https://en.wikipedia.org/wiki/Viterbi_algorithm) consisting of 2 macro steps: a forward step (where the possible sub-tokens are identified) and a backward step (where the most likely decoding sequence is identified). These steps are described in detail in this [excellent article](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html). 
 
 The forward steps identifies the sub-token with the highest probability at each character position of the word. The result at the end of the forward pass is a list of best sub-tokens ending at each position of the input string. Note that this best sub-token at a given ending position takes into account the raw likelihood of the sub-token *and* the likelihood of the best token sequence leading to it (as opposed to the probability provided in the vocabulary that does not consider the surrounding context). The Viterbi algorithm uses the fact that the likelihood of a token ending at character position `end_idx` and starting at position `start_idx`, is given by `Likelihood(Best_sequence_ending_at_start_idx) + Likelihood(sub-token)`. Two methods for this forward pass will be described in the following with a proposed implementation in Rust. In both case the high level algorithm forward pass accomplishes the following:
 
@@ -110,7 +92,7 @@ By construction, the forward pass provides the token with the highest likelihood
 
 The following will walk through two implementations of the algorithm in Rust.
 
-## First implementation
+# First implementation
 
 As a reminder the forward pass of the algorithm requires identifying the most likely token at each character position of the input:
 
@@ -288,7 +270,7 @@ This C++ implementation takes **9.7µs** and **29.8µs**, respectively. The Rust
 
 Looking back at the implementation, one can notice the inefficiency during the forward pass: the nested loop will causes `N²` lookups into a very large `HashMap`. Using the [hashbrown](https://github.com/rust-lang/hashbrown) port of  Google's  [SwissTable](https://abseil.io/blog/20180927-swisstables) allows to take these times down to 14.2µs and 238.9µs. This is better but we definitely still have a problem for longer inputs because of this `N²` complexity!
 
-## Second implementation
+# Second implementation
 
 The nested `for` loop over the entire input length is too costly, especially for longer inputs. Intuitively, as the `end_idx` cursor moves towards the end of the input, one can guess that low values for `start_idx` of the substring are unlikely to be in the vocabulary. Therefore, one should only explore part of the space of substrings ending (or starting) at a given input character position. The [reference C++ implementation](https://github.com/google/sentencepiece/blob/master/src/unigram_model.cc) relies on [Directed Acrylic Graphs](https://en.wikipedia.org/wiki/Directed_acyclic_graph).
 
@@ -499,3 +481,4 @@ There is still room for optimization, but this implementation of a SentencePiece
 - [On Subword Units: Segmentation for Natural Language Modeling, 2019](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html), Kyle Chung
 - [SentencePiece library](https://github.com/google/sentencepiece)
 - [Tensorflow.js Universal Sentence Encoder repository](https://github.com/tensorflow/tfjs-models/tree/master/universal-sentence-encoder/src/tokenizer), Tensorflow Team
+- 
