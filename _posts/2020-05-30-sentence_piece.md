@@ -486,4 +486,4 @@ There is still room for optimization, but this implementation of a SentencePiece
 - [On Subword Units: Segmentation for Natural Language Modeling, 2019](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html), Kyle Chung
 - [SentencePiece library](https://github.com/google/sentencepiece)
 - [Tensorflow.js Universal Sentence Encoder repository](https://github.com/tensorflow/tfjs-models/tree/master/universal-sentence-encoder/src/tokenizer), Tensorflow Team
-- 
+- [The Rust programming language](https://www.rust-lang.org)
