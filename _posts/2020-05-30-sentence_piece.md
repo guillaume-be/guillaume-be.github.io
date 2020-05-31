@@ -46,16 +46,20 @@ The SentencePiece unigram model aims at maximizing the likelihood of a unigram l
 
 ## Encoding
 
-Encoding is used during the training maximization step of EM and at inference in order to encode a new input text. The focus of this article will be on the implementation of this encoding step that is used at inference time. The encoding is done using the [Viterbi decoding algorithm](https://en.wikipedia.org/wiki/Viterbi_algorithm) consisting of 2 macro steps: a forward step (where the possible sub-tokens are identified) and a backward step (where the most likely decoding sequence is identified). These steps are described in detail in this [excellent article](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html). 
+### Algorithm
 
-The forward steps identifies the sub-token with the highest probability at each character position of the word. The result at the end of the forward pass is a list of best sub-tokens ending at each position of the input string. Note that this best sub-token at a given ending position takes into account the raw likelihood of the sub-token *and* the likelihood of the best token sequence leading to it (as opposed to the probability provided in the vocabulary that does not consider the surrounding context). The Viterbi algorithm uses the fact that the likelihood of a token ending at character position `end_idx` and starting at position `start_idx`, is given by `Likelihood(Best_sequence_ending_at_start_idx) + Likelihood(sub-token)`. Two methods for this forward pass will be described in the following with a proposed implementation in Rust. In both case the high level algorithm forward pass accomplishes the following:
+Encoding (the focus of this article) is used during the training maximization step of EM and at inference in order to encode a new input text. The encoding is done using the [Viterbi decoding algorithm](https://en.wikipedia.org/wiki/Viterbi_algorithm) consisting of 2 macro steps: a forward step (where the possible sub-tokens are identified) and a backward step (where the most likely decoding sequence is identified). These steps are described in detail in this [excellent article](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html). 
+
+1. The forward steps identifies the sub-token with the highest probability at each character position of the word. The result at the end of the forward pass is a list of best sub-tokens ending at each character position of the input string. Note that this best sub-token at a given ending character position takes into account the raw likelihood of the sub-token *and* the likelihood of the best token sequence leading to it (as opposed to the probability provided in the vocabulary that does not consider the surrounding context). The Viterbi algorithm uses the fact that the likelihood of a token ending at character position `end_idx` and starting at position `start_idx`, is given by $$\mathcal{L}(Best\:sequence\:up\:to\:start\:idx) + \mathcal{L}(subtoken)$$. Two methods for this forward pass will be described in the following with a proposed implementation in Rust. In both case the high level algorithm forward pass accomplishes the following:
 
 ~~~
 1. initialize best_ending_subtokens = [None] * len(input)
 1. For end_idx in [0:len(input)]:
     best_ending_subtokens[end_idx] = identify_best_token_ending_at(end_idx)
 ~~~
-the `identify_best_token_ending_at` method is described in the following section of this article. The backward pass takes this list of most likely tokens ending at each position to decode the sequence starting from the end and building its way back to the beginning.
+the `identify_best_token_ending_at` method is described in the following sections of this article. 
+
+2. The backward pass takes this list of most likely tokens ending at each position to decode the sequence starting from the end and building its way back to the beginning.
 
 ~~~
 end = len(input)
@@ -69,7 +73,8 @@ End while
 reverse(sub_tokens)
 ~~~
 
-Let's take the following example word to tokenize. The illustrations are heavily inspired by another recommended read on the SentencePiece unigram algorithm by [Kyle Chung](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html): 
+### Example 
+The illustrations are heavily inspired by another recommended read on the SentencePiece unigram algorithm by [Kyle Chung](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html). Let's take the following example word to tokenize. : 
 > Sesquipedalophobia (fear of long words)
 
 The reference SentencePiece library with a pretrained tokenizer used by [XLNet](https://arxiv.org/abs/1906.08237) tokenizes this long and rare word as :
@@ -102,7 +107,7 @@ As a reminder the forward pass of the algorithm requires identifying the most li
     best_ending_subtokens[end_idx] = identify_best_token_ending_at(end_idx)
 ~~~
 
-One potential implementation of the `identify_best_token_ending_at` method is to take slices of the substring ending at `end_idx` and calculating the likelihood for each slice. This results in a nested `for` loop to generate these slices. For each slice, the log probability or the token is equal to the log probability of the slice itself added to the probability of the best sequence leading to it. To implement this Viterbi algorithm the best slices and best scores are stored for each ending position and can be re-used to populate the most likely tokens ending at subsequent positions. This is the proposed implementation by [Kyle Chung](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html): 
+One potential implementation of the `identify_best_token_ending_at` method is to take slices of the substring ending at `end_idx` with incremental start position and calculating the likelihood for each slice. This results in a nested `for` loop to generate these slices. For each slice, the log probability or the token is equal to the log probability of the slice itself added to the probability of the best sequence leading to it. To implement this Viterbi algorithm the best slices and best scores are stored for each ending position and can be re-used to populate the most likely tokens ending at subsequent positions. This is the proposed implementation by [Kyle Chung](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html): 
 
 ~~~
 1. initialize best_ending_subtokens = [None] * len(input)
