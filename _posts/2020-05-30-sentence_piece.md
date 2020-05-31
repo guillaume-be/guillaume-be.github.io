@@ -31,7 +31,7 @@ $$\sum_{Vocabulary}P(x) = 1$$
 
 The algorithm consists of two macro steps: the training on a large corpus and the encoding of sentences at inference time. A detailed description of the training mechanism of the unigram model is beyond the scope of this article, and the focus will rather be on the encoding mechanism.
 
-## Training
+## 1. Training
 
 The SentencePiece unigram model aims at maximizing the likelihood of a unigram language model by starting f which is pruned iteratively using the Expectation Maximization algorithm. 
 
@@ -44,7 +44,7 @@ The SentencePiece unigram model aims at maximizing the likelihood of a unigram l
     3. Compute the loss for every vocabulary token, loss being the impact of dropping said token from the vocabulary on the overall likelihood $$\mathcal{L}$$.
     4. Prune the vocabulary by keeping the top $$x\% (e.g. 80\%)$$) tokens with the lowest loss. In order to eliminate the risk of an out-of-vocabulary character item, single characters are usually excluded from this pruning step.
 
-## Encoding
+## 2. Encoding
 
 ### Algorithm
 
