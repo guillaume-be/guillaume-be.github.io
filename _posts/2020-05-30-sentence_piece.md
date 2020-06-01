@@ -475,7 +475,7 @@ fn main() {
 
 The output is still as expected. Do we observe performance benefits? Running the same benchmark as before, we now obtain a tokenization speed of **12µs** for the first sentence and **44.8µs** for the longer second sentence. This is still slightly slower (although in the same order of magnitude) than the reference C++ implementation, but more than 13x faster than our original implementation!
 
-There is still room for optimization, but this implementation of a SentencePiece encoding is readable, fits in about 150 lines of code (compared to a much larger codebase for the C++ counterpart) and runs at a speed that is comparable to the reference. A more comprehensive implementation of this tokenization that includes vocabulary encoding and begin/end offsets of the tokens with respect to the original strings is available on the [rust_tokenizers](https://crates.io/crates/rust_tokenizers) crate.
+There is still room for optimization, but this implementation of a SentencePiece encoding is readable, fits in about 150 lines of code (compared to a much larger codebase for the C++ counterpart) and runs at a speed that is comparable to the reference. The supporting code used for this article is available in the following [repository](https://github.com/guillaume-be/SentencePiece-Rust-example). Please note this code is designed for educational purposes. A more comprehensive implementation of this tokenization that includes vocabulary encoding and begin/end offsets of the tokens with respect to the original strings is available on the [rust_tokenizers](https://crates.io/crates/rust_tokenizers) crate.
 
 
 ## References

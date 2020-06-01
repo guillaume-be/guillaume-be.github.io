@@ -8,4 +8,10 @@ My name's Guillaume and I am a Deep Learning Engineer with a focus on Natural La
 
 As I was working on these projects, I realized that the Rust language is an ideal fit for NLP project at various complexity levels. I would like to share here some thoughts and lesson I've learned during the implementation I hope will benefit data scientists getting started with Rust (or the other way around...)
 
+<div style="text-align: center;">
+<a href="mailto:guillaume.becquin@gmail.com">email</a> / 
+<a href="https://github.com/guillaume-be">Github</a> / 
+<a href="https://www.linkedin.com/in/guillaume-becquin-67a20b6b">LinkedIn</a> / 
+</div>
+
 Thanks for reading!
