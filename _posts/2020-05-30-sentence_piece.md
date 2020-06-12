@@ -271,7 +271,7 @@ It works but how fast does it run compared to the C++ implementation? Let's benc
 
 This C++ implementation takes **9.7µs** and **29.8µs**, respectively. The Rust version (with all compiler optimizations) takes **29µs** for the first and **614.5µs** for the second sentence. 
 
-*Oops!* That is 3 times faster than C++ for the short sentence and more than an order of magnitude slower for longer sentence.
+*Oops!* That is 3 times slower than C++ for the short sentence and more than an order of magnitude slower for the longer sentence.
 
 Looking back at the implementation, one can notice the inefficiency during the forward pass: the nested loop will causes `N²` lookups into a very large `HashMap`. Using the [hashbrown](https://github.com/rust-lang/hashbrown) port of  Google's  [SwissTable](https://abseil.io/blog/20180927-swisstables) allows to take these times down to 14.2µs and 238.9µs. This is better but we definitely still have a problem for longer inputs because of this `N²` complexity!
 
