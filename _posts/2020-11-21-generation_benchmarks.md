@@ -60,7 +60,9 @@ print(text_generator("As far as I am concerned, I will",
 
 This article will briefly describe the architecture of such models before diving in a comparison of the baseline Python Transformers library with a proposed Rust-based implementation: rust-bert [[9]](#rustbert)
 
-# Overview of Summarization and Translation models
+# Overview of models
+
+### Summarization and Translation
 
 Translation and summarization both rely on a similar architecture, although the model weights natural vary from application to application. They are essentially made of:
 1. A pre-processing pipeline mostly comprising of a tokenizer (such as Byte Pair Encoding or SentencePiece/Unigram-based) and an encoder (mapping individual tokens to a vocabulary index and other optional inputs (such as position indices)).
@@ -74,7 +76,14 @@ This iterative process is illustrated at a high level in the figure below:
 
 This process (and in the special case of BART and Marian - the model architecture itself) is identical between translation and summarization. Only the tokenization process and the model parameters differ between the two applications, showing the high versatility of this system. 
 
-One may also note the complexity of the generation routine, involving a significant number of operations beyond the model forward pass, helping to improve the quality of the generated text. However, these improvements do not come for free and incur additional computational cost in both the model forward pass (beam search increases the effective batch size) and in post-processing operations.
+### Text generation
+
+The process for text generation using GPT2 is very similar. However, GPT2 is a decoder-only model, and does not contain the encoder part of the transformers architectures. The model uses the starting prompt (and sequence generated so far) as only input. While it therefore does not need to compute encoder states ate cache them, it still relies on an efficient caching mechanism to avoid unnecessary re-computation of activations already computed during the generation process.
+### ToDO: add the generation process for GPT2
+
+### On the complexity of the generation routine
+
+For both architectures, one may note the complexity of the generation routine, involving a significant number of operations beyond the model forward pass, helping to improve the quality of the generated text. However, these improvements do not come for free and incur additional computational cost in both the model forward pass (beam search increases the effective batch size) and in post-processing operations.
 
 The Python Transformer's library already leverages Rust-based tokenizers for all its ready-to-use pipelines, therefore accelerating the preprocessing part of the system. Some benchmarks on question answering [[9]](#rustbert) indicate that the preprocessing can amount to 20% to 30% of the processing time for simple pipelines. The post-processing, also involving operations that go beyond tensor operations, is however implemented in Python in the Transformer's library. The rest of this article assesses the impact of a high-performance implementation of the entire system in Rust (therefore covering the post-processing pipeline) using the rust-bert library [[9]](#rustbert).
 
@@ -131,7 +140,6 @@ ToDo:
         2. show the numbers
         3. comment
     - show it for text generation
-
 
 - Next steps:
     - synergies with model optimization techniques (distillation, quantization, pruning)
