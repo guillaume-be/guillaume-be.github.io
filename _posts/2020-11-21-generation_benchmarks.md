@@ -30,8 +30,7 @@ summarization_pipeline = pipeline("summarization")
 summarization_pipeline(input_article)
 ```
 returning:
->
-### ToDo: add resulting summarization
+>  K2-18b is the first such discovery in a planet in its star's habitable zone. It is not too hot and not too cold for liquid water to exist on a planet that orbits a star 110 light years from Earth. Scientists from the University of Montreal and a team from UCL found water in the atmosphere of the planet. The Montreal team used data from the NASA's Hubble telescope to assess changes in the light coming from the star as the planet passed between it and Earth.
 
 #### Translation
 Similarly, a translation model can be easily created to translate a sentence of this document to Spanish:
@@ -44,8 +43,7 @@ translation_pipeline("They found that certain wavelengths of light, which are us
  does K2-18b have an atmosphere, but the atmosphere contains water in vapour form.")
 ```
 returning: 
->
->### ToDo: add resulting translation
+> Encontraron que ciertas longitudes de onda de la luz, que generalmente son absorbidas por el agua, se debilitaban cuando el planeta estaba en el camino, lo que indica que no sólo K2-18b tiene una atmósfera, sino que la atmósfera contiene agua en forma de vapor.
 
 #### Text generation
 Text can be generated using a text generation pipeline:
@@ -53,10 +51,12 @@ Text can be generated using a text generation pipeline:
 from transformers import pipeline
 text_generator = pipeline("text-generation")
 
-print(text_generator("As far as I am concerned, I will", 
-    max_length=32, 
+print(text_generator("The majority of crustaceans are aquatic,", 
+    max_length=64, 
     do_sample=False))
 ```
+returning:
+> The majority of crustaceans are aquatic, meaning they live on land, rivers, and lakes. Carnivorous crustacean species, such as those found in the Pacific Northwest, are found in all parts of the world, including the United States, Canada, Australia, New Zealand, and Japan.
 
 This article will briefly describe the architecture of such models before diving in a comparison of the baseline Python Transformers library with a proposed Rust-based implementation: rust-bert [[9]](#rustbert)
 
