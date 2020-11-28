@@ -11,18 +11,10 @@ Over the past few months, text generation capabilities using Transformer-based m
 
 These models offer state-of-the-art performance and can be set-up with just a few lines of code using ready-to-use pipelines in the Transformers library. This allowed a wide spread of the recent advances in the field of NLP to the industry where they can be effectively used to solve business-driven use cases.
 
-To illustrate both translation and summarization capabilities, we'll use this news article from  WikiNews shared under  CC BY 2.5 license [[8]](#wikinews): 
-
-> In findings published Tuesday in Cornell University's arXiv by a team of scientists from the University of Montreal and a separate report published Wednesday in Nature Astronomy by a team from University College London (UCL), the presence of water vapour was confirmed in the atmosphere of K2-18b, a planet circling a star in the constellation Leo. This is the first such discovery in a planet in its star's habitable zone — not too hot and not too cold for liquid water to exist.
-The Montreal team, led by Björn Benneke, used data from the NASA's Hubble telescope to assess changes in the light coming from K2-18b's star as the planet passed between it and Earth. They found that certain wavelengths of light, which are usually absorbed by water, weakened when the planet was in the way, indicating not only does K2-18b have an atmosphere, but the atmosphere contains water in vapour form. The team from UCL then analyzed the Montreal team's data using their own software and confirmed their conclusion.
-This was not the first time scientists have found signs of water on an exoplanet, but previous discoveries were made on planets with high temperatures or other pronounced differences from Earth.
-"This is the first potentially habitable planet where the temperature is right and where we now know there is water," said UCL astronomer Angelos Tsiaras. "It's the best candidate for habitability right now."
-"It's a good sign", said Ryan Cloutier of the Harvard–Smithsonian Center for Astrophysics, who was not one of either study's authors. "Overall," he continued, "the presence of water in its atmosphere certainly improves the prospect of K2-18b being a potentially habitable planet, but further observations will be required to say for sure."
-K2-18b was first identified in 2015 by the Kepler space telescope. It is about 110 light-years from Earth and larger but less dense. Its star, a red dwarf, is cooler than the Sun, but the planet's orbit is much closer, such that a year on K2-18b lasts 33 Earth days.
-According to The Guardian, astronomers were optimistic that NASA's James Webb space telescope — scheduled for launch in 2021 — and the European Space Agency's 2028 ARIEL program, could reveal more about exoplanets like K2-18b.
+To illustrate both translation and summarization capabilities, we'll use a <a href="https://en.wikinews.org/wiki/Astronomers_find_water_vapour_in_atmosphere_of_exoplanet_K2-18b" target="_blank">news article</a> from  WikiNews shared under  CC BY 2.5 license [[8]](#wikinews) talking about the recent discovery of water on an exoplanet called K2-18b.
 
 #### Summarization
-This article can be summarized calling the following snippet from the Transformer's Python library [[1]](#transformers), defaulting to a BART model trained on the CNDailyMal dataset:
+This article can be summarized calling the following snippet from the Transformer's Python library [[1]](#transformers), defaulting to a BART model trained on the CNN-DailyMail dataset:
 ```python
 from transformers import pipeline
 summarization_pipeline = pipeline("summarization")
@@ -103,7 +95,7 @@ These models can be used in ready-to-use pipelines, including:
 - translation
 - summarization
 
-The last two pipelines allow for a side-by-side comparison of the Python implementation (with Rust tokenizers) and the end-to-end Rust version. The two pipelines mentioned above can also be instantiated in a few lines of code:
+The last text generation pipelines allow for a side-by-side comparison of the Python implementation (with Rust tokenizers) and the end-to-end Rust version. The three pipelines mentioned above can also be instantiated in a few lines of code:
 
 #### Summarization
 ```rust
@@ -124,15 +116,48 @@ model.translate(&["They found that certain wavelengths of light, which are usual
  absorbed by water, weakened when the planet was in the way, indicating not only 
  does K2-18b have an atmosphere, but the atmosphere contains water in vapour form."]);
 ```
-ToDo:
-- schema of the generation process (preprocessing, encoder hidden states, generation loop with potential improvement options, decoder input, caching...)
-- Mention the algorithm is identical, only different models/weights are used for translation and summarization
-- note on the complexity of the post-processing operations
-- (brief) introduction to rust-bert
-    - short abstract about what the library is about
-    - link to paper describing the system and to github
-    - example of how the summarization and translation would be called in Rust
-- Goal of article: how does Rust high performance impact the generation process
+#### Generation
+```rust
+use rust_bert::pipelines::text_generation::TextGenerationModel;
+let model = TextGenerationModel::new(Default::default())?;
+
+let input_context = "The majority of crustaceans are aquatic,";
+model.generate(&[input_context], None);
+```
+
+These pipelines bring state-of-the-art NLP capabilities to the Rust community. Please check `rust-bert`'s [repository](https://github.com/guillaume-be/rust-bert), or the associated paper [[9]](#rustbert) if you are interested in learning more about the capabilities of the library. The rest of this article will focus on the performance comparison of the original Python-based text generation pipelines (using the Transformers library [[1]](#transformers)) and the proposed Rust-based implementation. 
+
+# Benchmarks
+
+The performance benchmarks proposed here will focus on the text generation task. Benchmarks have been performed for simpler pipelines (for example classifications) and are available in [[9]](#rustbert). For simple pipelines with low to no post-processing operations, there is little to gain from a Rust implementation. The forward pass through the neural network leverage the same backend (Rust bindings to the C++ Libtorch library [[14]](#tch)). Potential benefits could be gained from the pre-processing and tokenization step, but the Transformers' library uses starting from v4.0.0 Rust-based tokenizers [[15]](#tokenizers) for all its models. The outcome is a virtually identical performance between the Rust and Python implementation for tasks such as classification, token classification or question answering.
+
+The text generation pipelines, however, do include a complex post-processing pipeline which is implemented natively in Python. Because of the iterative process involving a model forward pass and the post-processing steps, a migration of the post-processing operations to Rust and use of bindings to Python (as is the case for tokenizers) is more difficult. This is an area where a fully Rust-native, end-to-end Rust implementation may offer benefits. This section describes a few experiments aiming at quantifying how significant these benefits may be.
+
+## Experimental setup
+
+The experimental setup for all experiments is unchanged and described below:
+
+| Hardware      |  |&nbsp; | &nbsp; |  Software |  |
+| :---------- | :---------- |:----- | :----| :-----|:------------  |
+| **CPU**     &nbsp; |  AMD 2700X       | &nbsp; &nbsp;&nbsp;| &nbsp; | **OS** &nbsp; | Windows 10 (Marian: Ubuntu 20.04) |
+| **GPU**     &nbsp; | Nvidia 2070 RTX  | &nbsp; &nbsp;&nbsp;| &nbsp; | **CUDA** &nbsp; | 10.2 |
+| **RAM**     &nbsp; |  32GB       | &nbsp;&nbsp;&nbsp; | &nbsp; |  **Python** &nbsp; | Python 3.7, Transformers v4.0.0rc1 |
+| **Drive**     &nbsp; | NVME 970 EVO  | &nbsp; &nbsp;&nbsp;| &nbsp; | **Rust** &nbsp; | rust-bert v0.12.0 |
+|     &nbsp; |   | &nbsp; | &nbsp; | **C++** &nbsp; &nbsp;&nbsp;| Opus-MT Marian Docker image v0.12.0 |
+
+<br/>
+
+By default experiments are run in Windows 10, with the exception of Marian ran natively in Ubuntu 20.04 on the same hardware. All experiments are repeated at least 10 iterations, the mean is reported. In all benchmarks, a warm-up run is executed (loading model in the GPU buffer and executing a forward pass) as the first GPU buffer allocation can be significantly slower.
+
+## Translation
+
+Two models are used for benchmark purposes for translation: an English to Spanish model trained by the Opus-MT team [[6]](#opusmt), and the T-5 base model allowing for translation (in this case, English to French) as part of its text-to-text capabilities. For all translation tasks, the source sentences are extracted from the example provided at the beginning of this article [[8]](#wikinews) (and of course identical between Python and Rust).
+
+| Num beams   |  Sampling   |  Sampling   |  Sampling   |  Sampling   |  Sampling   |  Sampling   |
+| :---------- | :---------- | :---------- | :---------- | :---------- | :---------- | :---------- |
+|  6          |   false     |   false     |   false     |   false     |   false     |   false     |
+
+
 
 - Benchmark text generation techniques
     - description of experimental setup (hardware and library versions)
@@ -155,7 +180,7 @@ ToDo:
 - <a name="xsum"></a>[3] [Don’t Give Me the Details, Just the Summary! Topic-Aware Convolutional Neural Networks for Extreme Summarization](https://www.aclweb.org/anthology/D18-1206/), Shashi Narayan, Shay B. Cohen, Mirella Lapata
 - <a name="bart"></a>[4] [BART: Denoising Sequence-to-Sequence Pre-training for Natural Language Generation, Translation, and Comprehension](https://www.aclweb.org/anthology/2020.acl-main.703/), Mike Lewis, Yinhan Liu, Naman Goyal, Marjan Ghazvininejad, Abdelrahman Mohamed, Omer Levy, Veselin Stoyanov, Luke Zettlemoyer
 - <a name="t5"></a>[5] [Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer](https://arxiv.org/abs/1910.10683), Colin Raffel, Noam Shazeer, Adam Roberts, Katherine Lee, Sharan Narang, Michael Matena, Yanqi Zhou, Wei Li, Peter J. Liu
-- <a name="opusmt"></a>[6] <https://github.com/Helsinki-NLP/Opus-MT>
+- <a name="opusmt"></a>[6] [Open neural machine translation models and web services](https://github.com/Helsinki-NLP/Opus-MT), The Opus-MT team
 - <a name="gpt2"></a>[7] [Language Models are Unsupervised Multitask Learners](https://d4mucfpksywv.cloudfront.net/better-language-models/language-models.pdf), Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, Ilya Sutskever
 - <a name="wikinews"></a>[8] [Astronomers find water vapour in atmosphere of exoplanet K2-18b](https://en.wikinews.org/wiki/Astronomers_find_water_vapour_in_atmosphere_of_exoplanet_K2-18b), WikiNews
 - <a name="rustbert"></a>[9] [End-to-end NLP Pipelines in Rust](https://www.aclweb.org/anthology/2020.nlposs-1.4/), Becquin, Guillaume
@@ -163,3 +188,5 @@ ToDo:
 - <a name="generation"></a>[11] [How to generate text: using different decoding methods for language generation with Transformers](https://huggingface.co/blog/how-to-generate), von Platen, Patrick
 - <a name="rusttokenizers"></a>[12] [rust_tokenizers](https://github.com/guillaume-be/rust-tokenizers)
 - <a name="modelhub"></a>[13] [Hugging Face model hub](https://huggingface.co/models?filter=rust)
+- <a name="tch"></a>[14] [tch-rs crate](https://github.com/LaurentMazare/tch-rs), Mazare, Laurent
+- <a name="tokenizers"></a>[15] [Tokenizers: Fast State-of-the-Art Tokenizers optimized for Research and Production](https://github.com/huggingface/tokenizers), The Huggingface team
