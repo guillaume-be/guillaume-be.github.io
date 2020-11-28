@@ -167,7 +167,7 @@ The figure below shows the results of the translation benchmark with the Marian 
 
 ![Marian Translation](../assets/generation_benchmarks/translation_marian.svg "Marian translation"){:width="80%"}
 
-The next figure illustrates the same experiment, taking the T5-base model (the only differences lies in the neural network architecture, the rest of the pipeline and settings remain identical). For a small effective batch size (3 input sentences), the benefits are in line with the Marian-based translation - approximately 50% faster for the Rust version. Interestingly, these benefits decrease significantly for larger effective batch sizes. This issue is still being investigated and may be cause by the handling of padding for sequences with varying length, or because T5 is a significantly larger model than Marian.
+The next figure illustrates the same experiment, taking the T5-base model (the only differences lies in the neural network architecture, the rest of the pipeline and settings remain identical). For a small effective batch size (3 input sentences), the benefits are in line with the Marian-based translation - approximately 50% reduced execution time for the Rust version. Interestingly, these benefits decrease significantly for larger effective batch sizes. This issue is still being investigated and may be cause by the handling of padding for sequences with varying length, or because T5 is a significantly larger model than Marian.
 
 ![T5 Translation](../assets/generation_benchmarks/translation_t5.svg "T5 translation"){:width="80%"}
 
@@ -189,7 +189,7 @@ The experimental set-up remains similar to that of translation, with 4 beams and
 
 <br/>
 
-The figure below shows the execution time for each model for both Python and Rust. Rust-based translation consistently runs approximately 55% faster than its Python counterpart. The Rust-based version of the BART-large 406M parameters runs faster than the smallest distilled model with 230M parameters in Python, showing that while research efforts aiming at reducing the model size are critical to ensure a sustainable use of NLP technologies, its benefits are comparable engineering-driven improvements resulting from high-performance languages implementations. More interestingly, this consistent 50%+ speed benefit shows that the two approaches are complementary. Combining distillation and an implementation in Rust, the summarization of a document can be accelerated by a factor of close to 5, from 2.57s down to les than 600ms.
+The figure below shows the execution time for each model for both Python and Rust. Rust-based translation consistently runs approximately 2x faster than its Python counterpart. The Rust-based version of the BART-large 406M parameters runs faster than the smallest distilled model with 230M parameters in Python, showing that while research efforts aiming at reducing the model size are critical to ensure a sustainable use of NLP technologies, its benefits are comparable engineering-driven improvements resulting from high-performance languages implementations. More interestingly, this consistent 50%+ execution time reduction shows that the two approaches are complementary. Combining distillation and an implementation in Rust, the summarization of a document can be accelerated by a factor of close to 5, from 2.57s down to les than 600ms.
 
 ![Summarization](../assets/generation_benchmarks/summarization_benchmark.svg "Summarization"){:width="95%"}
 
@@ -207,9 +207,16 @@ The last experiment investigates the performance benefits of a Rust implementati
 
 <br/>
 
-The benefits for text generation are significantly higher than for the Python-based pipeline, from 6x faster to an order of magnitude faster for 3 prompts processed in parallel. This is most likely caused by a sub-optimal implementation of the pipeline for the Python version as the reported generation times seem excessive. The output of both the Python and Rust versions has been validated and is identical when the sampling is turned off. The further benefits (compared to summarization or translation) may also come from the sampling mechanism which is only turned on for this experiment, possibly indicating a potential specific area of improvement for the Python-based library. 
+The benefits of the Rust implementation for text generation are significantly higher than for the previous experiments, with the Rust pipeline running roughly 4x faster than its Python equivalent. Note that these experiment do not use the ready-to-use pipeline from the Transformers library as this does not support batched input yet. Instead, the inputs for the Python experiment have been manually encoded and padded to the left with `<eos>` tokens. The inputs are subsequently processed in a single batch in both the Python and Rust pipelines to allow for a fair comparison.
 
-![Text generation](../assets/generation_benchmarks/generation.svg "Text generation"){:width="85%"}
+The text generation pipeline uses sampling, while the previous two experiments covering summarization and translation did not (a deterministic behaviour is expected in this case). This additional post-processing operation is likely to be the cause of the significant increase in performance difference between Python and Rust. For validation purposes, this sampling was turned off for both framework and the experiment repeated. The experiments without sampling validate this assumption, and Rust is approximately 2x faster than Python for deterministic generation, in line with the past benchmark. 
+
+This last experiment provides two insights:
+- First, sampling for text generation is expensive. It slows down the Python generation by a factor of ~4 and Rust by a factor of ~3 and should therefore be used with its additional computational cost in mind.
+- Second, this illustrates that as the post-processing pipeline increases in complexity, the Rust benefits become more significant. The benefits from faster beam search (~2x speedup) seem to be comparable to the benefit from faster sampling (additional ~2x speedup), resulting in ~4x speedup for the complete post-processing operation.
+
+![Text generation](../assets/generation_benchmarks/generation.svg "Text generation"){:width="100%"}
+
 
 # Final thoughts
 
