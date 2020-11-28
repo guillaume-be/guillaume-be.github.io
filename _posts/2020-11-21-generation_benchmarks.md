@@ -71,15 +71,17 @@ Translation and summarization both rely on a similar architecture, although the 
 
 3. A generation routine, which in its simplest form will keep calling the transformer-based models to generate tokens until the sequence is completed (output of an `End Of Sequence` token). Note that the encoder only needs to be run once in this iterative process: its output is cached and re-used at each decoder generation step. In practice, more advanced algorithms are used to improve the quality of the generation, including beam search, sampling, length and repetition penalties. These methods are summarized in an excellent article from Hugging Face [[11]](#generation). Careful design of the decoder allows to not only cache the encoder states, but also parts of the keys and values in the decoder to avoid unnecessary re-calculation and speed-up the decoding process.
 
-This iterative process is illustrated at a high level in the figure below:
-### ToDo: add the generation process illustration
+This iterative process is illustrated at a high level in the figure below (with slight simplifications, especially for the end of generation condition):
+
+![Encoder decoder generation architecture](../assets/generation_benchmarks/encoder_decoder.svg "Encoder decoder generation architecture")
 
 This process (and in the special case of BART and Marian - the model architecture itself) is identical between translation and summarization. Only the tokenization process and the model parameters differ between the two applications, showing the high versatility of this system. 
 
 ### Text generation
 
 The process for text generation using GPT2 is very similar. However, GPT2 is a decoder-only model, and does not contain the encoder part of the transformers architectures. The model uses the starting prompt (and sequence generated so far) as only input. While it therefore does not need to compute encoder states ate cache them, it still relies on an efficient caching mechanism to avoid unnecessary re-computation of activations already computed during the generation process.
-### ToDO: add the generation process for GPT2
+
+![Decoder generation architecture](../assets/generation_benchmarks/decoder.svg?width=250 "Decoder generation architecture"){:width="70%"}
 
 ### On the complexity of the generation routine
 
