@@ -165,11 +165,11 @@ All sentences are processed in a single batch. To illustrate the impact of the b
 
 The figure below shows the results of the translation benchmark with the Marian English to Spanish model. For both input sizes, the Rust-based translation executes approximately 60% faster than its Python counterpart - regardless of the number of input sentences provided. Interestingly, the Rust and C++ (Marian) translation have the same performance, even though they do not share the same tensor operations backend (Marian uses its own optimized auto-differentiation engine [[16]](#marian) while the Rust version relies on bindings to the Libtorch library).
 
-![Marian Translation](../assets/generation_benchmarks/translation_marian.svg "Marian translation"){:width="75%"}
+![Marian Translation](../assets/generation_benchmarks/translation_marian.svg "Marian translation"){:width="80%"}
 
 The next figure illustrates the same experiment, taking the T5-base model (the only differences lies in the neural network architecture, the rest of the pipeline and settings remain identical). For a small effective batch size (3 input sentences), the benefits are in line with the Marian-based translation - approximately 50% faster for the Rust version. Interestingly, these benefits decrease significantly for larger effective batch sizes. This issue is still being investigated and may be cause by the handling of padding for sequences with varying length, or because T5 is a significantly larger model than Marian.
 
-![T5 Translation](../assets/generation_benchmarks/translation_t5.svg "T5 translation"){:width="75%"}
+![T5 Translation](../assets/generation_benchmarks/translation_t5.svg "T5 translation"){:width="80%"}
 
 ## Summarization
 
@@ -193,7 +193,23 @@ The figure below shows the execution time for each model for both Python and Rus
 
 ![Summarization](../assets/generation_benchmarks/summarization_benchmark.svg "Summarization"){:width="95%"}
 
+## Text generation
 
+The last experiment investigates the performance benefits of a Rust implementation for free text generation using a GPT2 language model. The architecture for this pipeline is slightly different (relies on a decoder model) and the model size is significantly smaller than for the previous pipelines. Sampling is turned on for these pipelines. In order to ensure a fair comparison (the sampling leads to non-deterministic output), the sequence output size is fixed to 64 tokens by fixing the sequence minimum and maximum lengths to this value. 5 output sequences with 5 beams are generated for each prompt, leading to an effective batch size of 25x the number of prompts. The text generation benchmark is illustrated for both a single prompt and 3 prompts processed in a single batch.
+
+| Setting     |  Value   | 
+| :---------- | :------- |
+|  **# beams**   &nbsp;&nbsp; |   5      |
+|  **sampling**   &nbsp;&nbsp; |   true     |
+|  **early stopping**  &nbsp;&nbsp; |   true     |
+|  **output sequences**  &nbsp;&nbsp; |   5     |
+|  **sequence length**  &nbsp;&nbsp; |   64     |
+
+<br/>
+
+The benefits for text generation are significantly higher than for the Python-based pipeline, from 6x faster to an order of magnitude faster for 3 prompts processed in parallel. This is most likely caused by a sub-optimal implementation of the pipeline for the Python version as the reported generation times seem excessive. The output of both the Python and Rust versions has been validated and is identical when the sampling is turned off. The further benefits (compared to summarization or translation) may also come from the sampling mechanism which is only turned on for this experiment, possibly indicating a potential specific area of improvement for the Python-based library. 
+
+![Text generation](../assets/generation_benchmarks/generation.svg "Text generation"){:width="85%"}
 
 # Final thoughts
 
@@ -201,19 +217,6 @@ These results highlight the potential of high-performance language for serving t
 
 Research efforts aiming at reducing the computational cost of deep learning models have translated in significant gains in execution speed, at only a marginal cost in the performance of these models. The proposed Rust implementation synergizes very well with this work: While techniques such as distillation or quantization are effective at reducing the cost of the forward pass through the neural network, a Rust implementation can significantly speed up the auxiliary operations (whose relative cost increases as the neural network gets optimized). Combined with Rust safe concurrency capabilities, the combination of these techniques enables a significant acceleration of text generation pipelines using state-of-the-art models.
 
-- Benchmark text generation techniques
-    - description of experimental setup (hardware and library versions)
-    - description of inputs for each task + benchmark: 
-        1. describe the input
-        2. describe the options (mention that the defaults may be different)
-        2. show the numbers
-        3. comment
-    - show it for text generation
-
-- Next steps:
-    - synergies with model optimization techniques (distillation, quantization, pruning)
-    - synergies with optimized runtimes
-    
 
 ## References
 - <a name="transformers"></a>[1] [Transformers: State-of-the-Art Natural Language Processing
