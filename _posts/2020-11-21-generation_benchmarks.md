@@ -73,7 +73,7 @@ This process (and in the special case of BART and Marian - the model architectur
 
 The process for text generation using GPT2 is very similar. However, GPT2 is a decoder-only model, and does not contain the encoder part of the transformers architectures. The model uses the starting prompt (and sequence generated so far) as only input. While it therefore does not need to compute encoder states ate cache them, it still relies on an efficient caching mechanism to avoid unnecessary re-computation of activations already computed during the generation process.
 
-![Decoder generation architecture](../assets/generation_benchmarks/decoder.svg?width=250 "Decoder generation architecture"){:width="70%"}
+![Decoder generation architecture](../assets/generation_benchmarks/decoder.svg "Decoder generation architecture"){:width="70%"}
 
 ### On the complexity of the generation routine
 
@@ -143,7 +143,7 @@ The experimental setup for all experiments is unchanged and described below:
 | **GPU**     &nbsp; | Nvidia 2070 RTX  | &nbsp; &nbsp;&nbsp;| &nbsp; | **CUDA** &nbsp; | 10.2 |
 | **RAM**     &nbsp; |  32GB       | &nbsp;&nbsp;&nbsp; | &nbsp; |  **Python** &nbsp; | Python 3.7, Transformers v4.0.0rc1 |
 | **Drive**     &nbsp; | NVME 970 EVO  | &nbsp; &nbsp;&nbsp;| &nbsp; | **Rust** &nbsp; | rust-bert v0.12.0 |
-|     &nbsp; |   | &nbsp; | &nbsp; | **C++** &nbsp; &nbsp;&nbsp;| Opus-MT Marian Docker image v0.12.0 |
+|     &nbsp; |   | &nbsp; | &nbsp; | **C++** &nbsp; &nbsp;&nbsp;| Opus-MT Marian Docker image |
 
 <br/>
 
@@ -151,13 +151,33 @@ By default experiments are run in Windows 10, with the exception of Marian ran n
 
 ## Translation
 
-Two models are used for benchmark purposes for translation: an English to Spanish model trained by the Opus-MT team [[6]](#opusmt), and the T-5 base model allowing for translation (in this case, English to French) as part of its text-to-text capabilities. For all translation tasks, the source sentences are extracted from the example provided at the beginning of this article [[8]](#wikinews) (and of course identical between Python and Rust).
+Two models are used for benchmark purposes for translation: an English to Spanish model trained by the Opus-MT team [[6]](#opusmt), and the T5-base model allowing for translation (in this case, English to French) as part of its text-to-text capabilities. For all translation tasks, the source sentences are extracted from the example provided at the beginning of this article [[8]](#wikinews) (and of course identical between Python and Rust).
 
-| Num beams   |  Sampling   |  Sampling   |  Sampling   |  Sampling   |  Sampling   |  Sampling   |
-| :---------- | :---------- | :---------- | :---------- | :---------- | :---------- | :---------- |
-|  6          |   false     |   false     |   false     |   false     |   false     |   false     |
+| Setting     |  Value   | 
+| :---------- | :------- |
+|  **# beams**   &nbsp;&nbsp; |   6      |
+|  **sampling**   &nbsp;&nbsp; |   false     |
+|  **early stopping**  &nbsp;&nbsp; |   true     |
+|  **output sequences**  &nbsp;&nbsp; |   1     |
+
+<br/>
+All sentences are processed in a single batch. To illustrate the impact of the batch size and padding, a sample of 10 sentences with various lengths and a single sentences are passed to the models. Note that since translation is done with 6 beams, the effective batch size is 6x the length of the input sequences.
+
+The figure below shows the results of the translation benchmark with the Marian English to Spanish model. For both input sizes, the Rust-based translation executes approximately 60% faster than its Python counterpart - regardless of the number of input sentences provided. Interestingly, the Rust and C++ (Marian) translation have the same performance, even though they do not share the same tensor operations backend (Marian uses its own optimized auto-differentiation engine [[16]](#marian) while the Rust version relies on bindings to the Libtorch library).
+
+![Marian Translation](../assets/generation_benchmarks/translation_marian.svg "Marian translation"){:width="75%"}
+
+The next figure illustrates the same experiment, taking the T5-base model (the only differences lies in the neural network architecture, the rest of the pipeline and settings remain identical). For a small effective batch size (3 input sentences), the benefits are in line with the Marian-based translation - approximately 50% faster for the Rust version. Interestingly, these benefits decrease significantly for larger effective batch sizes. This issue is still being investigated and may be cause by the handling of padding for sequences with varying length, or because T5 is a significantly larger model than Marian.
+
+![T5 Translation](../assets/generation_benchmarks/translation_t5.svg "T5 translation"){:width="75%"}
 
 
+
+# Final thoughts
+
+These results highlight the potential of high-performance language for serving text generation models under low latency. This also illustrate the potential of Rust as a replacement for C++ in latency sensitive applications. Bringing performance benefits in line with C++, its memory safety, concurrency and accessibility to Machine Learning engineers make it a powerful additional choice for the deployment of performant, machine-learning powered applications.
+
+Research efforts aiming at reducing the computational cost of deep learning models have translated in significant gains in execution speed, at only a marginal cost in the performance of these models. The proposed Rust implementation synergizes very well with this work: While techniques such as distillation or quantization are effective at reducing the cost of the forward pass through the neural network, a Rust implementation can significantly speed up the auxiliary operations (whose relative cost increases as the neural network gets optimized). Combined with Rust safe concurrency capabilities, the combination of these techniques enables a significant acceleration of text generation pipelines using state-of-the-art models.
 
 - Benchmark text generation techniques
     - description of experimental setup (hardware and library versions)
@@ -190,3 +210,5 @@ Two models are used for benchmark purposes for translation: an English to Spanis
 - <a name="modelhub"></a>[13] [Hugging Face model hub](https://huggingface.co/models?filter=rust)
 - <a name="tch"></a>[14] [tch-rs crate](https://github.com/LaurentMazare/tch-rs), Mazare, Laurent
 - <a name="tokenizers"></a>[15] [Tokenizers: Fast State-of-the-Art Tokenizers optimized for Research and Production](https://github.com/huggingface/tokenizers), The Huggingface team
+- <a name="marian"></a>[16] [Marian: Fast Neural Machine Translation in C++](https://www.aclweb.org/anthology/P18-4020/), Marcin Junczys-Dowmunt, Roman Grundkiewicz, Tomasz Dwojak, Hieu Hoang, Kenneth Heafield, Tom Neckermann, Frank Seide, Ulrich Germann, Alham Fikri Aji, Nikolay Bogoychev, André F. T. Martins, Alexandra Birch
+
