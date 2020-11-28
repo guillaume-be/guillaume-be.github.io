@@ -171,6 +171,28 @@ The next figure illustrates the same experiment, taking the T5-base model (the o
 
 ![T5 Translation](../assets/generation_benchmarks/translation_t5.svg "T5 translation"){:width="75%"}
 
+## Summarization
+
+This section investigates the performance of summarization models using models based on a BART architecture. The article introduced at the beginning of this article is used for all experiments. Because of the higher computational cost of this pipeline, batch-wise summarization is not investigated. Note that since beam search is used, an effective batch size of length *#beams* is still used. In order to illustrate the impact of the model size, 3 different models (one baseline model and two distilled models) are used for benchmarks:
+- BART-large model finetuned on the CNN-DailyMail dataset (406M parameters)
+- DistilBART-12-6 model [[17]](#distilbart) with 12 encoder layers and 6 decoder layers (306M parameters)
+- DistilBART-6-6 model with 6 encoder layers and 6 decoder layers(230M parameters)
+
+The experimental set-up remains similar to that of translation, with 4 beams and no sampling.
+
+| Setting     |  Value   | 
+| :---------- | :------- |
+|  **# beams**   &nbsp;&nbsp; |   4      |
+|  **sampling**   &nbsp;&nbsp; |   false     |
+|  **early stopping**  &nbsp;&nbsp; |   true     |
+|  **output sequences**  &nbsp;&nbsp; |   1     |
+
+<br/>
+
+The figure below shows the execution time for each model for both Python and Rust. Rust-based translation consistently runs approximately 55% faster than its Python counterpart. The Rust-based version of the BART-large 406M parameters runs faster than the smallest distilled model with 230M parameters in Python, showing that while research efforts aiming at reducing the model size are critical to ensure a sustainable use of NLP technologies, its benefits are comparable engineering-driven improvements resulting from high-performance languages implementations. More interestingly, this consistent 50%+ speed benefit shows that the two approaches are complementary. Combining distillation and an implementation in Rust, the summarization of a document can be accelerated by a factor of close to 5, from 2.57s down to les than 600ms.
+
+![Summarization](../assets/generation_benchmarks/summarization_benchmark.svg "Summarization"){:width="95%"}
+
 
 
 # Final thoughts
@@ -211,4 +233,5 @@ Research efforts aiming at reducing the computational cost of deep learning mode
 - <a name="tch"></a>[14] [tch-rs crate](https://github.com/LaurentMazare/tch-rs), Mazare, Laurent
 - <a name="tokenizers"></a>[15] [Tokenizers: Fast State-of-the-Art Tokenizers optimized for Research and Production](https://github.com/huggingface/tokenizers), The Huggingface team
 - <a name="marian"></a>[16] [Marian: Fast Neural Machine Translation in C++](https://www.aclweb.org/anthology/P18-4020/), Marcin Junczys-Dowmunt, Roman Grundkiewicz, Tomasz Dwojak, Hieu Hoang, Kenneth Heafield, Tom Neckermann, Frank Seide, Ulrich Germann, Alham Fikri Aji, Nikolay Bogoychev, André F. T. Martins, Alexandra Birch
+- <a name="distilbart"></a>[17] [Pre-trained Summarization Distillation](https://arxiv.org/abs/2010.13002), Sam Shleifer, Alexander M. Rush
 
