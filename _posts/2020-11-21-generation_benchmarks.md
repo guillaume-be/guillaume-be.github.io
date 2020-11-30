@@ -153,7 +153,7 @@ The experimental setup for all experiments is unchanged and described below:
 
 <br/>
 
-By default experiments are run in Windows 10, with the exception of Marian executed natively in Ubuntu 20.04 on the same hardware. All experiments are repeated at least 10 iterations and the mean is reported. In all benchmarks, a warm-up run is executed (loading model in the GPU buffer and running a forward pass) as the first GPU buffer allocation can be significantly slower.
+By default experiments are run in Windows 10, with the exception of Marian executed natively in Ubuntu 20.04 on the same hardware. All experiments are repeated at least 10 iterations and the mean is reported. In all benchmarks, a warm-up run is executed (loading model in the GPU buffer and running a forward pass) as the first GPU buffer allocation can be significantly slower. The source code for all benchmarks is available in the references [[18]](#benchmark-files) section.
 
 ### Translation
 
@@ -173,7 +173,7 @@ The figure below shows the results of the translation benchmark with the Marian 
 
 ![Marian Translation](../assets/generation_benchmarks/translation_marian.svg "Marian translation"){:width="80%"}
 
-The next figure illustrates the same experiment, taking the T5-base model (the only differences lies in the neural network architecture, the rest of the pipeline and settings remain identical). For a small effective batch size (3 input sentences), the benefits are in line with the Marian-based translation - approximately 50% reduced execution time for the Rust version. Interestingly, these benefits decrease significantly for larger effective batch sizes. This issue is still being investigated and may be cause by the handling of padding for sequences with varying length, or because T5 is a significantly larger model than Marian.
+The next figure illustrates the same experiment, taking the T5-base model (the only differences lies in the neural network architecture, the rest of the pipeline and settings remain identical). For a small effective batch size (3 input sentences), the benefits are in line with the Marian-based translation - approximately 50% reduced execution time for the Rust version. Interestingly, these benefits decrease significantly for larger effective batch sizes. This issue is still being investigated and may be caused by the handling of padding for sequences with varying length, or because T5 is a significantly larger model than Marian.
 
 ![T5 Translation](../assets/generation_benchmarks/translation_t5.svg "T5 translation"){:width="80%"}
 
@@ -188,14 +188,14 @@ The experimental set-up remains similar to that of translation, with 4 beams and
 
 | Setting     |  Value   | 
 | :---------- | :------- |
-|  **# beams**   &nbsp;&nbsp; |   4      |
+|  **# beams**   &nbsp;&nbsp; |   3      |
 |  **sampling**   &nbsp;&nbsp; |   false     |
 |  **early stopping**  &nbsp;&nbsp; |   true     |
 |  **output sequences**  &nbsp;&nbsp; |   1     |
 
 <br/>
 
-The figure below shows the execution time for each model for both Python and Rust. Rust-based translation consistently runs approximately 2x faster than its Python counterpart. The Rust-based version of the BART-large 406M parameters runs faster than the smallest distilled model with 230M parameters in Python, showing that while research efforts aimed at reducing the model size are critical to ensure a sustainable use of NLP technologies, engineering-driven improvements allow reaching comparable speed-ups. More interestingly, this consistent 50%+ execution time reduction shows that the two approaches are complementary. Combining distillation and an implementation in Rust, the summarization of a document can be accelerated by a factor of close to 5, from 2.57s down to les than 600ms.
+The figure below shows the execution time for each model for both Python and Rust. Rust-based translation consistently runs approximately 2x faster than its Python counterpart. The Rust-based version of the BART-large 406M parameters runs faster than the smallest distilled model with 230M parameters in Python, showing that while research efforts aimed at reducing the model size are critical to ensure a sustainable use of NLP technologies, engineering-driven improvements allow reaching comparable speed-ups. More interestingly, this consistent 50%+ execution time reduction shows that the two approaches are complementary. Combining distillation and an implementation in Rust, the summarization of a document can be accelerated by a factor of close to 5, from 2.57s down to less than 600ms.
 
 ![Summarization](../assets/generation_benchmarks/summarization_benchmark.svg "Summarization"){:width="95%"}
 
@@ -250,4 +250,4 @@ Research efforts aimed at reducing the computational cost of deep learning model
 - <a name="tokenizers"></a>[15] [Tokenizers: Fast State-of-the-Art Tokenizers optimized for Research and Production](https://github.com/huggingface/tokenizers), The Huggingface team
 - <a name="marian"></a>[16] [Marian: Fast Neural Machine Translation in C++](https://www.aclweb.org/anthology/P18-4020/), Marcin Junczys-Dowmunt, Roman Grundkiewicz, Tomasz Dwojak, Hieu Hoang, Kenneth Heafield, Tom Neckermann, Frank Seide, Ulrich Germann, Alham Fikri Aji, Nikolay Bogoychev, André F. T. Martins, Alexandra Birch
 - <a name="distilbart"></a>[17] [Pre-trained Summarization Distillation](https://arxiv.org/abs/2010.13002), Sam Shleifer, Alexander M. Rush
-
+- <a name="benchmark-files"></a>[18] Source code for benchmarks: <a href="https://gist.github.com/guillaume-be/3c103bce3a23336b2bdde308639a42c6" target="_blank">translation (Python)</a>, <a href="https://gist.github.com/guillaume-be/56a6c42b939fcd1f7770765cb530d313" target="_blank">summarization (Python)</a>, <a href="https://gist.github.com/guillaume-be/75b5909ee2b28fe24c5ba120abcd5101" target="_blank">text generation (Python)</a>, <a href="https://github.com/guillaume-be/rust-bert/tree/master/benches" target="_blank">Rust</a>
