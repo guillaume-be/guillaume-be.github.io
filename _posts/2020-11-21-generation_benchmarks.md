@@ -4,16 +4,27 @@ title: "Accelerating text generation with Rust"
 author: "Guillaume"
 ---
 
-Over the past few months, text generation capabilities using Transformer-based models has been democratized by Hugging Face's Transformers [[1]](#transformers) library. A broad range of models and applications have been made available, including:
+Over the past few months, text generation capabilities using Transformer-based models has been democratized by open-source efforts such as Hugging Face's Transformers [[1]](#transformers) library. A broad range of models and applications have been made available, including:
 - Summarization models fine-tuned on the CNN-DailyMail [[2]](#cnndailymail) or XSUM [[3]](#xsum) datasets, including for example BART [[4]](#bart) or T5 [[5]](#t5)
 - Translation, with the availability of more than a thousand models trained by the Opus-MT team from Language Technology at the University of Helsinki [[6]](#opusmt)
 - Text generation, generating tokens from a prompt text, including OpenAI's GPT2 model [[7]](#gpt2)
 
-These models offer state-of-the-art performance and can be set-up with just a few lines of code using ready-to-use pipelines in the Transformers library. This allowed a wide spread of the recent advances in the field of NLP to the industry where they can be effectively used to solve business-driven use cases.
+These models offer state-of-the-art performance and can be set-up with just a few lines of code using ready-to-use pipelines in the Transformers library. This allowed a wide spread of the recent advances in the field of NLP to the industry where they can be effectively used to solve business-driven use cases. As these powerful model gain a broader adoption, the issue of their computational efficiency becomes ever more critical. A lot of research has been done to reduce the size of these models with minimal impact on their accuracy, including for example distillation, quantization or pruning. This article will focus on another avenue to improve the runtime of text generation models: an implementation in the Rust programming language.
 
-To illustrate both translation and summarization capabilities, we'll use a <a href="https://en.wikinews.org/wiki/Astronomers_find_water_vapour_in_atmosphere_of_exoplanet_K2-18b" target="_blank">news article</a> from  WikiNews shared under  CC BY 2.5 license [[8]](#wikinews) talking about the recent discovery of water on an exoplanet called K2-18b.
+The structure of the article is as follows:
 
-#### Summarization
+1. Overview of the tasks for text generation and Python baseline code examples from the Transformers [[1]](#transformers) library.
+2. Description of the text generation architecture used for summarization, translation and free text generation tasks
+3. Introduction to the `rustbert` library, a project of mine offering Rust-native implementation of these models in Rust
+4. Benchmarks between the baseline Python implementation from Transformers and the proposed Rust implementation for these text generation tasks
+
+Readers familiar with text generation tasks and their implementation in modern language models may want to skip directly to section 3. The first two parts provide a high level overview of the technology to better understand the scope of the proposed performance improvements, and provide a few references in order to dive deeper in the topic.
+
+# 1. Overview of text generation tasks<a name="task-overview"></a>
+
+To illustrate both translation and summarization capabilities, we'll use a new article titled <a href="https://en.wikinews.org/wiki/Astronomers_find_water_vapour_in_atmosphere_of_exoplanet_K2-18b" target="_blank">Astronomers find water vapour in atmosphere of exoplanet K2-18b</a> from  WikiNews shared under  CC BY 2.5 license [[8]](#wikinews).
+
+### Summarization
 This article can be summarized calling the following snippet from the Transformer's Python library [[1]](#transformers), defaulting to a BART model trained on the CNN-DailyMail dataset:
 ```python
 from transformers import pipeline
@@ -24,7 +35,7 @@ summarization_pipeline(input_article)
 returning:
 >  K2-18b is the first such discovery in a planet in its star's habitable zone. It is not too hot and not too cold for liquid water to exist on a planet that orbits a star 110 light years from Earth. Scientists from the University of Montreal and a team from UCL found water in the atmosphere of the planet. The Montreal team used data from the NASA's Hubble telescope to assess changes in the light coming from the star as the planet passed between it and Earth.
 
-#### Translation
+### Translation
 Similarly, a translation model can be easily created to translate a sentence of this document to Spanish:
 ```python
 from transformers import pipeline
@@ -37,7 +48,7 @@ translation_pipeline("They found that certain wavelengths of light, which are us
 returning: 
 > Encontraron que ciertas longitudes de onda de la luz, que generalmente son absorbidas por el agua, se debilitaban cuando el planeta estaba en el camino, lo que indica que no sólo K2-18b tiene una atmósfera, sino que la atmósfera contiene agua en forma de vapor.
 
-#### Text generation
+### Text generation
 Text can be generated using a text generation pipeline:
 ```python
 from transformers import pipeline
@@ -52,11 +63,11 @@ returning:
 
 This article will briefly describe the architecture of such models before diving in a comparison of the baseline Python Transformers library with a proposed Rust-based implementation: rust-bert [[9]](#rustbert)
 
-# Overview of models
+# 2. Overview of models and system architecture<a name="models-overview"></a>
 
 ### Summarization and Translation
 
-Translation and summarization both rely on a similar architecture, although the model weights natural vary from application to application. They are essentially made of:
+Translation and summarization both rely on a similar architecture, although the model weights naturally vary from application to application. They are essentially made of:
 1. A pre-processing pipeline mostly comprising of a tokenizer (such as Byte Pair Encoding or SentencePiece/Unigram-based) and an encoder (mapping individual tokens to a vocabulary index and other optional inputs (such as position indices)).
 
 2. A transformer-based model, based on an encoder-decoder architecture. If you are not familiar with Transformer-based encoder-decoder architecture, I highly recommend the blog post "The Illustrated Transformer" [[10]](#illustratedtransformer). The encoder is comprised of a stack of self-attention and fully connected layers and encodes the input sequence (i.e. text to be translated or summarized) into a latent space. The decoder is made of a similar stack of self-attention layers completed with cross-attention to the encoder hidden states, allowing to leverage the representations generated during encoding. The decoder takes as an input the output sequence generated so far and the encoder output to generate the next tokens. The decoder therefore generates output tokens one at a time.
@@ -81,7 +92,7 @@ For both architectures, one may note the complexity of the generation routine, i
 
 The Python Transformer's library already leverages Rust-based tokenizers for all its ready-to-use pipelines, therefore accelerating the preprocessing part of the system. Some benchmarks on question answering [[9]](#rustbert) indicate that the preprocessing can amount to 20% to 30% of the processing time for simple pipelines. The post-processing, also involving operations that go beyond tensor operations, is however implemented in Python in the Transformer's library. The rest of this article assesses the impact of a high-performance implementation of the entire system in Rust (therefore covering the post-processing pipeline) using the rust-bert library [[9]](#rustbert).
 
-# A brief introduction to rust-bert
+# 3. A brief introduction to rust-bert<a name="rustbert-section"></a>
 
 Rust-bert is essentially a Rust-native port of Hugging Face's Transformers' library [[1]](#transformers). Leveraging the `rust_tokenizers` [[12]](#rusttokenizers) library for preprocessing, it proposes implementations for state-of-the-art transformers-based models and ready-to-use pipelines. De-noising auto-encoder (BERT, Electra), autoregressive (XLNet, GPT, GPT2) and encoder-decoder models (BART, T5) have been implemented with pre-trained set of weights available on Hugging Face's model hub [[13]](#modelhub). Any Pytorch model trained on the Transformers's library can be converted to a C-array format and used by the `rust-bert` library.
 
@@ -97,7 +108,7 @@ These models can be used in ready-to-use pipelines, including:
 
 The last text generation pipelines allow for a side-by-side comparison of the Python implementation (with Rust tokenizers) and the end-to-end Rust version. The three pipelines mentioned above can also be instantiated in a few lines of code:
 
-#### Summarization
+### Summarization
 ```rust
 use rust_bert::pipelines::summarization::SummarizationModel;
 let summarization_model = SummarizationModel::new(Default::default())?;
@@ -105,7 +116,7 @@ let summarization_model = SummarizationModel::new(Default::default())?;
 summarization_model.summarize(&input);
 ```
 
-#### Translation
+### Translation
 ```rust
 use rust_bert::pipelines::translation::{Language, TranslationConfig, TranslationModel};
 let translation_config =
@@ -116,7 +127,7 @@ model.translate(&["They found that certain wavelengths of light, which are usual
  absorbed by water, weakened when the planet was in the way, indicating not only 
  does K2-18b have an atmosphere, but the atmosphere contains water in vapour form."]);
 ```
-#### Generation
+### Generation
 ```rust
 use rust_bert::pipelines::text_generation::TextGenerationModel;
 let model = TextGenerationModel::new(Default::default())?;
@@ -127,13 +138,13 @@ model.generate(&[input_context], None);
 
 These pipelines bring state-of-the-art NLP capabilities to the Rust community. Please check `rust-bert`'s [repository](https://github.com/guillaume-be/rust-bert), or the associated paper [[9]](#rustbert) if you are interested in learning more about the capabilities of the library. The rest of this article will focus on the performance comparison of the original Python-based text generation pipelines (using the Transformers library [[1]](#transformers)) and the proposed Rust-based implementation. 
 
-# Benchmarks
+# 4. Benchmarks<a name="benchmarks"></a>
 
 The performance benchmarks proposed here will focus on the text generation task. Benchmarks have been performed for simpler pipelines (for example classifications) and are available in [[9]](#rustbert). For simple pipelines with low to no post-processing operations, there is little to gain from a Rust implementation. The forward pass through the neural network leverage the same backend (Rust bindings to the C++ Libtorch library [[14]](#tch)). Potential benefits could be gained from the pre-processing and tokenization step, but the Transformers' library uses starting from v4.0.0 Rust-based tokenizers [[15]](#tokenizers) for all its models. The outcome is a virtually identical performance between the Rust and Python implementation for tasks such as classification, token classification or question answering.
 
 The text generation pipelines, however, do include a complex post-processing pipeline which is implemented natively in Python. Because of the iterative process involving a model forward pass and the post-processing steps, a migration of the post-processing operations to Rust and use of bindings to Python (as is the case for tokenizers) is more difficult. This is an area where a fully Rust-native, end-to-end Rust implementation may offer benefits. This section describes a few experiments aiming at quantifying how significant these benefits may be.
 
-## Experimental setup
+### Experimental setup
 
 The experimental setup for all experiments is unchanged and described below:
 
@@ -149,7 +160,7 @@ The experimental setup for all experiments is unchanged and described below:
 
 By default experiments are run in Windows 10, with the exception of Marian ran natively in Ubuntu 20.04 on the same hardware. All experiments are repeated at least 10 iterations, the mean is reported. In all benchmarks, a warm-up run is executed (loading model in the GPU buffer and executing a forward pass) as the first GPU buffer allocation can be significantly slower.
 
-## Translation
+### Translation
 
 Two models are used for benchmark purposes for translation: an English to Spanish model trained by the Opus-MT team [[6]](#opusmt), and the T5-base model allowing for translation (in this case, English to French) as part of its text-to-text capabilities. For all translation tasks, the source sentences are extracted from the example provided at the beginning of this article [[8]](#wikinews) (and of course identical between Python and Rust).
 
@@ -171,7 +182,7 @@ The next figure illustrates the same experiment, taking the T5-base model (the o
 
 ![T5 Translation](../assets/generation_benchmarks/translation_t5.svg "T5 translation"){:width="80%"}
 
-## Summarization
+### Summarization
 
 This section investigates the performance of summarization models using models based on a BART architecture. The article introduced at the beginning of this article is used for all experiments. Because of the higher computational cost of this pipeline, batch-wise summarization is not investigated. Note that since beam search is used, an effective batch size of length *#beams* is still used. In order to illustrate the impact of the model size, 3 different models (one baseline model and two distilled models) are used for benchmarks:
 - BART-large model finetuned on the CNN-DailyMail dataset (406M parameters)
@@ -189,11 +200,11 @@ The experimental set-up remains similar to that of translation, with 4 beams and
 
 <br/>
 
-The figure below shows the execution time for each model for both Python and Rust. Rust-based translation consistently runs approximately 2x faster than its Python counterpart. The Rust-based version of the BART-large 406M parameters runs faster than the smallest distilled model with 230M parameters in Python, showing that while research efforts aiming at reducing the model size are critical to ensure a sustainable use of NLP technologies, its benefits are comparable engineering-driven improvements resulting from high-performance languages implementations. More interestingly, this consistent 50%+ execution time reduction shows that the two approaches are complementary. Combining distillation and an implementation in Rust, the summarization of a document can be accelerated by a factor of close to 5, from 2.57s down to les than 600ms.
+The figure below shows the execution time for each model for both Python and Rust. Rust-based translation consistently runs approximately 2x faster than its Python counterpart. The Rust-based version of the BART-large 406M parameters runs faster than the smallest distilled model with 230M parameters in Python, showing that while research efforts aimed at reducing the model size are critical to ensure a sustainable use of NLP technologies, engineering-driven improvements allow reaching comparable speed-ups. More interestingly, this consistent 50%+ execution time reduction shows that the two approaches are complementary. Combining distillation and an implementation in Rust, the summarization of a document can be accelerated by a factor of close to 5, from 2.57s down to les than 600ms.
 
 ![Summarization](../assets/generation_benchmarks/summarization_benchmark.svg "Summarization"){:width="95%"}
 
-## Text generation
+### Text generation
 
 The last experiment investigates the performance benefits of a Rust implementation for free text generation using a GPT2 language model. The architecture for this pipeline is slightly different (relies on a decoder model) and the model size is significantly smaller than for the previous pipelines. Sampling is turned on for these pipelines. In order to ensure a fair comparison (the sampling leads to non-deterministic output), the sequence output size is fixed to 64 tokens by fixing the sequence minimum and maximum lengths to this value. 5 output sequences with 5 beams are generated for each prompt, leading to an effective batch size of 25x the number of prompts. The text generation benchmark is illustrated for both a single prompt and 3 prompts processed in a single batch.
 
@@ -220,7 +231,7 @@ This last experiment provides two insights:
 
 # Final thoughts
 
-These results highlight the potential of high-performance language for serving text generation models under low latency. This also illustrate the potential of Rust as a replacement for C++ in latency sensitive applications. Bringing performance benefits in line with C++, its memory safety, concurrency and accessibility to Machine Learning engineers make it a powerful additional choice for the deployment of performant, machine-learning powered applications.
+These results highlight the potential of high-performance languages, including Rust, for serving text generation models under low latency. Bringing performance benefits in line with C++, its memory safety, concurrency and accessibility to Machine Learning engineers make it a powerful additional choice for the deployment of performant, machine-learning powered applications.
 
 Research efforts aiming at reducing the computational cost of deep learning models have translated in significant gains in execution speed, at only a marginal cost in the performance of these models. The proposed Rust implementation synergizes very well with this work: While techniques such as distillation or quantization are effective at reducing the cost of the forward pass through the neural network, a Rust implementation can significantly speed up the auxiliary operations (whose relative cost increases as the neural network gets optimized). Combined with Rust safe concurrency capabilities, the combination of these techniques enables a significant acceleration of text generation pipelines using state-of-the-art models.
 
