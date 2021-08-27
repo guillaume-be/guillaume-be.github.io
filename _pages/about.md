@@ -11,7 +11,7 @@ As I was working on these projects, I realized that the Rust language is an idea
 <div style="text-align: center;">
 <a href="mailto:guillaume.becquin@gmail.com">email</a> / 
 <a href="https://github.com/guillaume-be">Github</a> / 
-<a href="https://www.linkedin.com/in/guillaume-becquin-67a20b6b">LinkedIn</a> / 
+<a href="https://www.linkedin.com/in/guillaume-becquin-67a20b6b">LinkedIn</a>
 </div>
 
-Thanks for reading!
+Thank you for reading!
