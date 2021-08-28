@@ -48,9 +48,43 @@ While "hello" would be tokenized as: <br>
 
 For computational efficiency, BPE training relies on a pre-tokenizer (e.g. whitespace tokenizer) in order to generate a dictionary with word frequencies (the original BPE algorithm does not allow cross-word merges). This word counter is used to initialize a counter of adjacent "bytes" (symbols) pairs that may be merged. This "symbol pairs" counter is used to create a new symbol in the dictionary, update the symbol pairs counts and repeat until the target vocabulary size is reached. As such, BPE is an  algorithm that grows its vocabulary at each iteration (in contrast with SentencePiece unigram's model that prunes a large vocabulary at each iteration).
 
-The entire training algorithm is rather straight-forward and given below [[1]](#bpe).
+The entire training algorithm is rather straight-forward and given below (reproduced from [[1]](#bpe)).
 
-
+{% include pseudocode.html id="1" code="
+\begin{algorithm}
+\caption{BPE Train}
+\begin{algorithmic}
+\PROCEDURE{UpdateMerges}{$vocab$}
+    \STATE $merges = $\CALL{InitializeMerges}{}
+    \FOR{$(word, freq)$ IN $Vocab$}
+        \STATE $symbols = $ \CALL{SplitWhitespace}{$word$}
+        \FOR{$i = 0$ \TO $len(symbols)$}
+            \STATE $merges[symbols[i], symbols[i+1]] += freq$
+        \ENDFOR
+    \ENDFOR
+    \RETURN $merges$
+\ENDPROCEDURE
+\PROCEDURE{MergeVocab}{$vocab_in, pair$}
+    \STATE $vocab_out = $\CALL{InitializeVocab}{}
+    \STATE $pattern = $ \CALL{Join}{pair}
+    \FOR{$(w_{in}, _)$ IN $vocab_in$}
+        \STATE $w_{out} = $ \CALL{Replace}{ $w_{in}$, $pair_{0} \sqcup pair_{1}$, $pair_{0} pair_{1}$}
+        \STATE $vocab_{out}[w_{out}] = vocab_{in}[w_{in}]$
+    \ENDFOR
+    \RETURN $vocab_{out}$
+\ENDPROCEDURE
+\PROCEDURE{Train}{$corpus$}
+    \STATE vocab = \CALL{CountWords}{$corpus$}
+    \FOR{$i = 0$ \TO $N_{merges}$}
+        \STATE $merges = $ \CALL{UpdateMerges}{$vocab$}
+        \STATE $most\:common\:pair = $ \CALL{MostCommon}{$merges$}
+        \STATE $vocab = $ \CALL{MergeVocab}{$vocab$, $most\:common\:pair$}
+    \ENDFOR
+    \RETURN $merges$
+\ENDPROCEDURE
+\end{algorithmic}
+\end{algorithm}
+" %}
 
 
 ## References
