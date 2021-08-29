@@ -32,6 +32,7 @@ Even though the BPE model needs to be trained before it can be used, we will fir
 
 The tokenization algorithm is as follows:
 
+<a name="bpe-tokenization-naive"></a>
 {% include pseudocode.html id="0" code="
 \begin{algorithm}
 \caption{BPE Tokenize}
@@ -133,6 +134,119 @@ The entire training algorithm is rather straight-forward and given below (reprod
 \end{algorithm}
 " %}
 
+The algorithm above can be improved as described in [[1]](#bpe) by updating data structures instead of re-computing the "merges" from scratch at each iteration. This article will however focus on the tokenization procedure called at prediction time.
+
+# 2. Rust implementation(s) of the BPE algorithm
+
+The rest of this article consists of a walk-through a number of working implementations of the BPE tokenization algorithm in Rust. Starting from a "naive" implementation approach, improvements will be made to highlight pros and cons of some common data structures within the scope of BPE tokenization.
+
+# ToDo: add a list of the proposed implementations with hyperlinks (overview)
+
+## a. Naive implementation
+
+Let's begin with a direct implementation of [[algorithm 1]](#bpe-tokenization-naive), which consists in 2 main procedures:
+1. Find the best merge
+2. Apply the best merge
+
+Until no valid merge can be found. Let's examine the algorithm complexity, where _N_ represents the number of characters of an input text. Assuming a lookup in the merges mapping can be done in constant time (a fair assumption for a standard hashmap implementation), the `FindBestPair` procedure has a $O(N)$ complexity (_symbols_ is of length _N_ for the first iteration). Similarly, the `MergeBestPair` has a $O(N)$ complexity if the `Merge` operation can be done in constant time. The main `Tokenize` procedure will iterate until no further merge can be found, which will result in _N-1_ merges in the "worst" case (if the entire word exists in the vocabulary). This results in a combined complexity of $O(N^{2})$. This motivates the pre-tokenization (e.g. whitespace splitting) step that usually precedes BPE tokenization, so that _N_ is the typical length of a word rather than a full sentence/document.
+
+Let's look at a Rust implementation of this algorithm. The following code has been edited to focus on the critical parts of the algorithm. The full working version can be found at [[7]](#bpe-code). Let's start by defining `Symbols`, the data structure representing a sub-token:
+
+```rust
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct Symbol {
+    pub start_byte: usize,
+    pub end_byte: usize,
+}
+```
+
+A symbol contains information related to the start and end byte positions of the sub-token. This is lighter than working with string slices (or significantly faster than string clones) and convenient for the operations we expect on `Symbols` (merges and lookups). We will not manipulate `Symbols` on their own, but rather work on a collection of `Symbols`. The naive implementation, looping over the list of symbols indicates a Rust `Vec` may be an appropriate structure to use:
+
+```rust
+pub struct SymbolArray {
+    pub symbols: Vec<Symbol>,
+}
+```
+
+The symbols are initialized from the characters of the input text (see algorithm 1, line _21_). We will create a method `from_text` that populates the initial `SymbolArray` from a string slice. Note that we look up character byte indices so that we handle characters that span over multiple UTF-8 bytes correctly.
+
+We also implement a method for finding the best pair to merge (given a tokenizer/merge dictionary) that will return an optional position of the best pair in the `SymbolArray`. When this method return `None`, we know that the array can no longer be merged. Finally, we implement directly a method to merge a pair of symbols mutating the SymbolArray inplace. This method will take the best pair position as an input to directly insert the merged pair and remove the two parents.
+
+```rust
+impl SymbolArray {
+    pub fn from_text(input_text: &str) -> Self {
+        let mut symbols = Vec::new();
+        for (character_start, character) in input_text.char_indices() {
+            symbols.push(Symbol {
+                start_byte: character_start,
+                end_byte: character_start + character.len_utf8(),
+            });
+        }
+        Self { symbols }
+    }
+
+    pub fn find_best_merge<T>(&self, input_text: &str, tokenizer: &T) -> Option<usize>
+    where
+        T: BpeTokenizer,
+    {
+        self.symbols
+            .iter()
+            .tuple_windows::<(&Symbol, &Symbol)>()
+            .enumerate()
+            .filter_map(|(pos, (first, second))| {
+                tokenizer
+                    .get_merge_score(first, second, input_text)
+                    .map(|rank| (pos, rank))
+            })
+            .min_by_key(|(_, rank)| *rank)
+            .map(|(pos, _)| pos)
+    }
+
+    pub fn merge_symbols(&mut self, best_pair_index: usize) -> Symbol {
+        let new_symbol = Symbol {
+            start_byte: self.symbols[best_pair_index].start_byte,
+            end_byte: self.symbols[best_pair_index + 1].end_byte,
+        };
+        self.symbols.remove(best_pair_index + 1);
+        self.symbols.remove(best_pair_index);
+        self.symbols.insert(best_pair_index, new_symbol);
+        new_symbol
+    }
+}
+```
+
+We still need to implement the actual tokenizer and `tokenize` procedure. This will pre-process the input text (replaces whitespaces by the corresponding `▁` encoding symbol in the pre-trained vocabulary), pre-populate a `SymbolArray` and identify/merge best symbol pairs until no further merge is possible. It then returns string slices with the sub-tokens. At no point the tokenizer creates a copy of the string input: it solely relies on byte positions and string slices.
+
+```rust
+pub struct NaiveBpeTokenizer {
+    merges_vocab: MergesVocab,
+}
+
+impl BpeTokenizer for NaiveBpeTokenizer {
+
+    fn tokenize<'a>(&self, input_text: &'a str) -> Vec<&'a str> {
+        let (text, byte_mapping) = self.pre_process_text(input_text, '▁');
+
+        let mut symbols = SymbolArray::from_text(text.as_str());
+        while let Some(best_pair_index) = symbols.find_best_merge(text.as_str(), self) {
+            symbols.merge_symbols(best_pair_index);
+        }
+        let mut output = Vec::new();
+        for symbol in symbols {
+            output.push(
+                &input_text[byte_mapping[&symbol.start_byte]..byte_mapping[&symbol.end_byte]],
+            );
+        }
+        output
+    }
+}
+```
+
+As mentioned previously, this algorithm has a $O(N^{2})$ complexity where N represents the number of characters in the input. This means that this algorithm will be unable to process long input text of the size of a sentence, paragraph or document. A common work-around consists in limiting the size of the input passed to the BPE tokenizer, for example by applying a whitespace splitting pre-tokenizer.
+
+b. Pre-splitting naive implementation
+
+The previous implementation can easily be extended to include a pre-tokenization step. This is actually the standard BPE implementation in several widely used packages, such as subword-nmt (Python) [[8]](#subword-nmt) or fastBPE (C++) [[9]](#fastbpe).
 
 ## References
 - <a name="bpe"></a>[1] [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909), Rico Sennrich, Barry Haddow, Alexandra Birch, 2015 
@@ -142,3 +256,6 @@ The entire training algorithm is rather straight-forward and given below (reprod
 - <a name="canine"></a>[5] [CANINE: Pre-training an Efficient Tokenization-Free Encoder for Language Representation](https://arxiv.org/abs/2103.06874), Jonathan H. Clark, Dan Garrette, Iulia Turc, John Wieting, 2021.
 - <a name="bpe-lecture"></a>[6] [Natural Language Processing
 with Deep Learning, CS224N/Ling284, lecture 12](https://web.stanford.edu/class/cs224n/slides/cs224n-2019-lecture12-subwords.pdf), Christopher Manning, Stanford.
+- <a name="bpe-code"></a>[7] [Byte Pair Encoding Rust Implementation](https://github.com/guillaume-be/bpe-example), Guillaume Becquin
+- <a name="subword-nmt"></a>[8] [Subword Neural Machine Translation](https://github.com/rsennrich/subword-nmt)
+- <a name="fastbpe"></a>[9] [fastBPE](https://github.com/glample/fastBPE)
