@@ -26,7 +26,52 @@ In contrast with SentencePiece statistical unigram model, BPE is a morphological
 
 Once can note that no unknown tokens can occur as an output of this process as long as all individual characters are present in the vocabulary (in the worst case, the sequence of individual characters will be returned). With a sufficiently large vocabulary, the most common words will be fully aggregated and the entire sequence of input characters will be returned as a single word token. Rare words will be returned as a list of sub-tokens that can no longer be aggregated.
 
-The following example illustrates how a merges vocabulary (mapping of symbols that may be aggregated with their frequency) is used to tokenize 2 words. Note that in practice, a `</w>` symbol is appended at the end of the initial word character decomposition and included in the merges vocabulary to differentiate end of words symbols.
+## Tokenization (prediction)
+
+Even though the BPE model needs to be trained before it can be used, we will first describe how it is used to tokenize an input sequence at prediction time in this article. This will help build an intuition on how the algorithm decomposes words into sub-tokens.
+
+The tokenization algorithm is as follows:
+
+{% include pseudocode.html id="0" code="
+\begin{algorithm}
+\caption{BPE Tokenize}
+\begin{algorithmic}
+\PROCEDURE{FindBestPair}{$symbols$, $merges$}
+    \STATE ($best\:pair$, $best\:score$) = ($null$, 0)
+    \FOR{$i = 0$ \TO $len(symbols) - 1$}
+        \STATE $score$ = \CALL{Get}{$merges$, $(symbols[i], symbols[i+1])$}
+        \IF{$score$ > $best\:score$}
+            \STATE ($best\:pair$, $best\:score$) = ($(symbols[i], symbols[i+1])$, score)
+        \ENDIF
+    \ENDFOR    
+    \RETURN ($best\:pair$, $best\:score$)
+\ENDPROCEDURE
+\STATE
+\PROCEDURE{MergeBestPair}{$symbols$, $best\:pair$}
+    \FOR{$i = 0$ \TO $len(symbols) - 1$}
+        \IF{$(symbols[i], symbols[i+1])$ = $best\:pair$}
+            \STATE \CALL{Merge}{$symbols[i], symbols[i+1]$}
+        \ENDIF
+    \ENDFOR    
+    \RETURN $symbols$
+\ENDPROCEDURE
+\STATE
+\PROCEDURE{Tokenize}{$text$, $merges$}
+    \STATE $symbols = $ \CALL{InitializeSymbols}{$text$} \COMMENT{Pre-populate symbols with individual characters and </w> token}
+    \WHILE {$true$}
+        \STATE $(best\:pair, best\:score) = $ \CALL{FindBestPair}{$symbols$, $merges$}
+        \IF{$best\:score$ is $null$}
+            \BREAK \COMMENT{Symbols can no longer be merged}
+        \ENDIF
+        \STATE $symbols$ = \CALL{MergeBestPair}{$symbols$, $best\:pair$}
+    \ENDWHILE
+    \RETURN $symbols$
+\ENDPROCEDURE
+\end{algorithmic}
+\end{algorithm}
+" %}
+
+`merges` is a learned mapping of symbol pairs to score that is learned during a training phase (see next section). The following example illustrates how a merges vocabulary (mapping of symbols that may be aggregated with their frequency) is used to tokenize 2 words. Note that in practice, a `</w>` symbol is appended at the end of the initial word character decomposition and included in the merges vocabulary to differentiate end of words symbols.
 ```json
 {
   "e r": 25,
@@ -38,13 +83,13 @@ The following example illustrates how a merges vocabulary (mapping of symbols th
   "hell o": 2 
 }
 ```
-"lower" would follow the following aggregation steps: <br>
-`[l, o, w, e, r] -> [l, o, w, er] -> [lo, w, er] -> [low, er]`
+- "lower" would follow the following aggregation steps: <br>
+`[l, o, w, e, r] -> [l, o, w, er] -> [lo, w, er] -> [low, er]` (`"low er"` not in merges vocabulary, causing an early stopping of the tokenization procedure at line _26_)
 
-While "hello" would be tokenized as: <br>
+- "hello" would be tokenized as: <br>
 `[h, e, l, l, o] -> [he, l, l, o] -> [he, ll, o] -> [hell, o] -> [hello]`
 
-## 1.a Training
+## Training
 
 For computational efficiency, BPE training relies on a pre-tokenizer (e.g. whitespace tokenizer) in order to generate a dictionary with word frequencies (the original BPE algorithm does not allow cross-word merges). This word counter is used to initialize a counter of adjacent "bytes" (symbols) pairs that may be merged. This "symbol pairs" counter is used to create a new symbol in the dictionary, update the symbol pairs counts and repeat until the target vocabulary size is reached. As such, BPE is an  algorithm that grows its vocabulary at each iteration (in contrast with SentencePiece unigram's model that prunes a large vocabulary at each iteration).
 
@@ -64,15 +109,17 @@ The entire training algorithm is rather straight-forward and given below (reprod
     \ENDFOR
     \RETURN $merges$
 \ENDPROCEDURE
-\PROCEDURE{MergeVocab}{$vocab_in, pair$}
-    \STATE $vocab_out = $\CALL{InitializeVocab}{}
+\STATE
+\PROCEDURE{MergeVocab}{$vocab_{in}, pair$}
+    \STATE $vocab_{out} = $\CALL{InitializeVocab}{}
     \STATE $pattern = $ \CALL{Join}{pair}
-    \FOR{$(w_{in}, _)$ IN $vocab_in$}
+    \FOR{$(w_{in}, _)$ IN $vocab_{in}$}
         \STATE $w_{out} = $ \CALL{Replace}{ $w_{in}$, $pair_{0} \sqcup pair_{1}$, $pair_{0} pair_{1}$}
         \STATE $vocab_{out}[w_{out}] = vocab_{in}[w_{in}]$
     \ENDFOR
     \RETURN $vocab_{out}$
 \ENDPROCEDURE
+\STATE
 \PROCEDURE{Train}{$corpus$}
     \STATE vocab = \CALL{CountWords}{$corpus$}
     \FOR{$i = 0$ \TO $N_{merges}$}
