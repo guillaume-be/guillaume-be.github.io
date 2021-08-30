@@ -140,9 +140,13 @@ The algorithm above can be improved as described in [[1]](#bpe) by updating data
 
 The rest of this article consists of a walk-through a number of working implementations of the BPE tokenization algorithm in Rust. Starting from a "naive" implementation approach, improvements will be made to highlight pros and cons of some common data structures within the scope of BPE tokenization.
 
-# ToDo: add a list of the proposed implementations with hyperlinks (overview)
+4 algorithms for the BPE tokenization will be presented:
+- [Naive implementation](#naive)
+- [Naive implementation with pre-splitting](#naive-pre-split)
+- [Priority Queue + Binary Search Tree implementation](#pq-bst)
+- Priority Queue + Linked List implementation
 
-## a. Naive implementation
+## a. <a name="naive"></a>Naive implementation
 
 Let's begin with a direct implementation of [[algorithm 1]](#bpe-tokenization-naive), which consists in 2 main procedures:
 1. Find the best merge
@@ -244,9 +248,84 @@ impl BpeTokenizer for NaiveBpeTokenizer {
 
 As mentioned previously, this algorithm has a $O(N^{2})$ complexity where N represents the number of characters in the input. This means that this algorithm will be unable to process long input text of the size of a sentence, paragraph or document. A common work-around consists in limiting the size of the input passed to the BPE tokenizer, for example by applying a whitespace splitting pre-tokenizer.
 
-b. Pre-splitting naive implementation
+## b. <a name="naive-pre-split"></a>Pre-splitting naive implementation
 
-The previous implementation can easily be extended to include a pre-tokenization step. This is actually the standard BPE implementation in several widely used packages, such as subword-nmt (Python) [[8]](#subword-nmt) or fastBPE (C++) [[9]](#fastbpe).
+The previous implementation can easily be extended to include a pre-tokenization step. This is actually the standard BPE implementation in several widely used packages, such as subword-nmt (Python) [[8]](#subword-nmt) or fastBPE (C++) [[9]](#fastbpe). By pre-tokenizing the sequence (for example whitespace splitting), one can effectively limit the average size of the inputs passed for BPE tokenization. A whitespace splitting will pass single words for processing. For most languages, the expected size of a word _M_ is much smaller than the number of characters in an average sentence or document _N_ (although after living in Germany for 10 years, the author realizes this hypothesis may be optimistic at times). The complexity of the tokenization for a word is $O(M^{2})$. Splitting the sequence into words using a simple whitespace/punctuation rule has a $O(N)$ complexity, resulting in a number of words that is at most _N_, meaning the algorithm complexity is $O(N) + O(N*M^{2}) = O(N)$ if $M \ll N$.
+
+To implement this tokenizer, the `Tokenizer` has an additional method for whitespace/punctuation tokenization. Punctuation are returned as a single character word, and other words contain the leading whitespace character if applicable. The method returns a vector of string slices:
+
+```rust
+impl NaivePreSplitBpeTokenizer {
+    fn split_whitespace_punctuation<'a>(
+        &self,
+        input_string: &'a str,
+        whitespace_token: char,
+    ) -> Vec<&'a str> {
+        let mut output: Vec<&str> = Vec::new();
+        let mut start: usize = 0;
+
+        for (c_pos, c) in input_string.char_indices() {
+            if c == whitespace_token {
+                if start < c_pos {
+                    output.push(&input_string[start..c_pos]);
+                }
+                start = c_pos;
+            } else if c.is_ascii_punctuation() {
+                if start < c_pos {
+                    output.push(&input_string[start..c_pos]);
+                }
+                output.push(&input_string[c_pos..c_pos + c.len_utf8()]);
+                start = c_pos + c.len_utf8();
+            }
+        }
+        if start < input_string.len() {
+            output.push(&input_string[start..]);
+        }
+        output
+    }
+}
+```
+
+The previous `tokenize` method can be modified to include the pre-tokenization step. This is essentially identical to the previous method, with the addition of the whitespace splitting and additional logic to keep track of the correct character offsets to return the sub-tokens:
+```rust
+impl BpeTokenizer for NaivePreSplitBpeTokenizer {
+    fn get_merges_vocab(&self) -> &MergesVocab {
+        &self.merges_vocab
+    }
+
+    fn tokenize<'a>(&self, input_text: &'a str) -> Vec<&'a str> {
+        let whitespace_token = '▁';
+
+        let (text, byte_mapping) = self.pre_process_text(input_text, whitespace_token);
+        let split_texts = self.split_whitespace_punctuation(text.as_str(), whitespace_token);
+
+        let mut output = Vec::new();
+        let mut offset = 0;
+        for split_text in split_texts {
+            let mut symbols = SymbolArray::from_text(split_text);
+            while let Some(best_pair_index) = symbols.find_best_merge(split_text, self) {
+                symbols.merge_symbols(best_pair_index);
+            }
+            for symbol in symbols.symbols {
+                output.push(
+                    &input_text[byte_mapping[&(offset + symbol.start_byte)]
+                        ..byte_mapping[&(offset + symbol.end_byte)]],
+                );
+            }
+            offset += split_text.len();
+        }
+        output
+    }
+}
+```
+
+This implementation brings the expected complexity from $O(N^{2})$ to $O(N)$ which is the best that can be done since the input needs to be scanned at least once to perform tokenization. This implementation, however, has the following drawbacks:
+- A whitespace/punctuation tokenization step is required. This works well for most latin language, but may be problematic for example for some Asian languages not relying on whitespaces. This is a significant limitation and requires handling languages differently based on their morphology and use of word separators. 
+- While faster, this algorithm is an approximation and prevents cross-word merges. It would for example be unable to merge words across punctuation symbols (such as "mother-in-law")
+
+The following sections will present two additional implementation that will aim at reducing the computational cost of the naive algorithm without relying on a pre-tokenization step.
+
+## c. <a name="pq-bst"></a>Priority Queue + Binary Search Tree implementation
 
 ## References
 - <a name="bpe"></a>[1] [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909), Rico Sennrich, Barry Haddow, Alexandra Birch, 2015 
