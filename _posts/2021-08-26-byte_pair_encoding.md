@@ -327,6 +327,70 @@ The following sections will present two additional implementation that will aim 
 
 ## c. <a name="pq-bst"></a>Priority Queue + Binary Search Tree implementation
 
+The nave algorithm suffers from a worst case $O(N^{2})$ complexity. This is due to up to _N_ iterations of `FindBestPair` and `MergeBestPair`. Generally, an input may be made from up to _N-1_ valid pairs that will be merged, and the outer loop complexity can therefore not be optimized. 
+
+The `MergeBestPair` complexity can be reduced to the time required to select the symbols to merge based on the best pair information if a single merge is performed at every iteration. The symbols can be compared and ordered based on their position - and a Binary Search Tree implementation of the _Symbols_ sequence allows finding elements in $O(\log(N))$ time instead of linear time for an array.
+
+The `FindBestPair` can be optimized by noting that the entire symbol pair information does not need to be re-computed entirely at each iteration, but rather updated after every merge. Merging two symbols will have a local impact on the merge information: only the symbols preceding and succeeding the pair to be merged are impacted: we need to check if the preceding symbol and newly created merged symbol form a valid pair. Similarly, we need to check if the newly created merged symbol and next symbol form a valid pair. We still need a data structure to store the symbol pair information:
+- _SymbolPairs_ can be compared and ordered based on their "cost": we need an ordered collection.
+- At each iteration, the _SymbolPair_ with the minimum cost will be processed: we need a collection with an effective `extract_min` operation.
+- At each iteration, up to 2 new _SymbolPairs_ will be inserted: we need a collection with an effective `insert` operation.
+
+These requirements effectively describe a priority queue which will be used to build and maintain the set of _SymbolPairs_. Using a Min Heap allows performing both `extract_min` and `insert` operations in $O(\log(N))$ time.
+
+By implementing the following data structures:
+- Binary Search Tree for the _Symbols_
+- Min Heap for the _SymbolPairs_,
+
+A worst-case complexity of $O(N(\log(N) + \log(N)))$ = $O(N\log(N))$, significantly better than the initial $O(N^{2})$. The maintenance of a priority queue for the _SymbolPairs_ to process is mentioned in the SentencePiece article [[10]](#sentencepiece-paper) and is used in the optimized BPE implementation of the C++ SentencePiece library [[11]](#sentencepiece-bpe). _Algorithm 1_ (BPE tokenization) becomes:
+
+{% include pseudocode.html id="2" code="
+\begin{algorithm}
+\caption{BPE Tokenize (Priority Queue)}
+\begin{algorithmic}
+\PROCEDURE{MaybeAddSymbolPair}{$symbol\:pairs$, $merges$, $symbol_{left}$, $symbol_{right}$}
+    \STATE $score = $\CALL{Get}{$merges$, $(symbol_{left}, symbol_{right})$}
+    \IF{$score \neq null$}
+        \STATE \CALL{Insert}{$symbol\:pairs$, $(symbol_{left}, symbol_{right}, score)$}
+    \ENDIF
+\ENDPROCEDURE
+\STATE
+\PROCEDURE{MergeBestPair}{$symbols$, $best\:pair$}
+    \STATE $new\:symbol = $ \CALL{Combine}{$best\:pair_{left}$, $best\:pair_{right}$}
+    \STATE \CALL{Remove}{$symbols$, $best\:pair_{left}$}
+    \STATE \CALL{Remove}{$symbols$, $best\:pair_{right}$}
+    \STATE \CALL{Insert}{$symbols$, $new\:symbol$}
+    \RETURN $new\:symbol$
+\ENDPROCEDURE
+\STATE
+\PROCEDURE{Tokenize}{$text$, $merges$}
+    \STATE $symbols = $ \CALL{InitializeSymbols}{$text$} \COMMENT{Pre-populate symbols with individual characters and </w> token}
+    \STATE $symbol\:pairs = $ \CALL{InitializeSymbolsPairs}{} 
+    \FOR{$i = 0$ \TO $len(symbols) - 1$} \COMMENT{Pre-populate symbol pairs}
+        \STATE \CALL{MaybeAddSymbolPair}{$symbol\:pairs$, $merges$, $(symbols[i], symbols[i+1])$}
+    \ENDFOR   
+    \WHILE {$true$}
+        \STATE $(best\:pair, best\:score) = $ \CALL{Pop}{$symbol\:pairs$}
+        \IF{$best\:score$ is $null$}
+            \BREAK \COMMENT{Symbols can no longer be merged}
+        \ENDIF
+        \IF{$best\:pair_{left} \neq null$ and $best\:pair_{right} \neq null$}
+            \STATE $new\:symbol$ = \CALL{MergeBestPair}{$symbols$, $best\:pair$}
+            \STATE $prev = $ \CALL{Left}{$symbols$, $best\:pair_{left}$}
+            \STATE $next = $ \CALL{Right}{$symbols$, $best\:pair_{right}$}
+            \STATE \CALL{MaybeAddSymbolPair}{$symbol\:pairs$, $merges$, $(prev, best\:pair_{left})$}
+            \STATE \CALL{MaybeAddSymbolPair}{$symbol\:pairs$, $merges$, $(best\:pair_{right})$, $next$}
+        \ENDIF
+    \ENDWHILE
+    \RETURN $symbols$
+\ENDPROCEDURE
+\end{algorithmic}
+\end{algorithm}
+" %}
+
+Lines _17_ to _21_ initialize both the _Symbols_ and _SymbolPairs_ data structures. At each iteration, the best _SymbolPair_ is popped from the priority queue (line _23_). The check on line _27_ is required as instead of manually removing invalid merges following a merge (if the first 2 elements of a triplets get merged, the pair information for the last 2 elements is no longer valid), we pop pairs from the _SymbolPairs_ and then check their validity. If the pair is still valid, we proceed to merge and check if new pairs should be added (lines _31_ and _32_).s
+
+
 ## References
 - <a name="bpe"></a>[1] [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909), Rico Sennrich, Barry Haddow, Alexandra Birch, 2015 
 - <a name="tf-idf"></a>[2] [term frequency–inverse document frequency](https://en.wikipedia.org/wiki/Tf–idf), Wikipedia foundation. 
@@ -338,3 +402,5 @@ with Deep Learning, CS224N/Ling284, lecture 12](https://web.stanford.edu/class/c
 - <a name="bpe-code"></a>[7] [Byte Pair Encoding Rust Implementation](https://github.com/guillaume-be/bpe-example), Guillaume Becquin
 - <a name="subword-nmt"></a>[8] [Subword Neural Machine Translation](https://github.com/rsennrich/subword-nmt)
 - <a name="fastbpe"></a>[9] [fastBPE](https://github.com/glample/fastBPE)
+- <a name="sentencepiece-paper"></a>[10] [SentencePiece: A simple and language independent subword tokenizer and detokenizer for Neural Text Processing](https://arxiv.org/abs/1808.06226), Taku Kudo, John Richardson
+- <a name="sentencepiece-bpe"></a>[11] [SentencePiece BPE model](https://github.com/google/sentencepiece/blob/master/src/bpe_model.cc), Taku Kudo
