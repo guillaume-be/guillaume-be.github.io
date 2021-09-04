@@ -388,7 +388,233 @@ A worst-case complexity of $O(N(\log(N) + \log(N)))$ = $O(N\log(N))$, significan
 \end{algorithm}
 " %}
 
-Lines _17_ to _21_ initialize both the _Symbols_ and _SymbolPairs_ data structures. At each iteration, the best _SymbolPair_ is popped from the priority queue (line _23_). The check on line _27_ is required as instead of manually removing invalid merges following a merge (if the first 2 elements of a triplets get merged, the pair information for the last 2 elements is no longer valid), we pop pairs from the _SymbolPairs_ and then check their validity. If the pair is still valid, we proceed to merge and check if new pairs should be added (lines _31_ and _32_).s
+Lines _17_ to _21_ initialize both the _Symbols_ and _SymbolPairs_ data structures. At each iteration, the best _SymbolPair_ is popped from the priority queue (line _23_). The check on line _27_ is required as instead of manually removing invalid merges following a merge (if the first 2 elements of a triplets get merged, the pair information for the last 2 elements is no longer valid), we pop pairs from the _SymbolPairs_ and then check their validity. If the pair is still valid, we proceed to merge and check if new pairs should be added (lines _31_ and _32_).
+
+Similarly to the _SymbolsArray_, the Rust implementation for the _Symbols_ Binary Search Tree contains a method mutate itself and merge two symbols:
+
+```rust
+pub struct SymbolBTree {
+    pub symbols: BTreeSet<Symbol>,
+}
+
+impl SymbolBTree {
+    pub fn merge_symbols(&mut self, symbol_1: &Symbol, symbol_2: &Symbol) -> Symbol {
+        self.symbols.remove(symbol_1);
+        self.symbols.remove(symbol_2);
+        let new_symbol = Symbol {
+            start_byte: symbol_1.start_byte,
+            end_byte: symbol_2.end_byte,
+        };
+        self.symbols.insert(new_symbol);
+        new_symbol
+    }
+}
+```
+
+The Tokenizer contains methods to build and maintain a priority queue of _SymbolPairs_ called "agenda":
+
+```rust
+impl PriorityQueueBpeTokenizer {
+    fn maybe_add_pair(
+        &self,
+        left_symbol: &Symbol,
+        right_symbol: &Symbol,
+        input_text: &str,
+        agenda: &mut BinaryHeap<SymbolPair>,
+    ) {
+        let merged_text = &input_text[left_symbol.start_byte..right_symbol.end_byte];
+        if let Some(&score) = self.merges_vocab.get(merged_text) {
+            agenda.push(SymbolPair {
+                left: *left_symbol,
+                right: *right_symbol,
+                score,
+            })
+        }
+    }
+}
+
+impl BpeTokenizer for PriorityQueueBpeTokenizer {
+    fn tokenize<'a>(&self, input_text: &'a str) -> Vec<&'a str> {
+        let (text, byte_mapping) = self.pre_process_text(input_text, '▁');
+
+        let mut symbols = SymbolBTree::from_text(text.as_str());
+        let mut agenda: BinaryHeap<SymbolPair> = BinaryHeap::new();
+
+        for (left_symbol, right_symbol) in symbols.iter().tuple_windows::<(&Symbol, &Symbol)>() {
+            self.maybe_add_pair(left_symbol, right_symbol, text.as_str(), &mut agenda);
+        }
+        
+        while let Some(symbol_pair) = agenda.pop() {
+            let left_symbol = symbols.get(&symbol_pair.left).cloned();
+            let right_symbol = symbols.get(&symbol_pair.right).cloned();
+
+            if let (Some(left_symbol), Some(right_symbol)) = (left_symbol, right_symbol) {
+                let new_symbol = symbols.merge_symbols(&left_symbol, &right_symbol);
+                if let Some(next) = symbols.symbols.range(new_symbol..).nth(1) {
+                    self.maybe_add_pair(&new_symbol, next, text.as_str(), &mut agenda);
+                }
+                if let Some(prev) = symbols.symbols.range(..new_symbol).next_back() {
+                    self.maybe_add_pair(prev, &new_symbol, text.as_str(), &mut agenda);
+                }
+            }
+        }
+
+        let mut output = Vec::new();
+        for symbol in symbols {
+            output.push(
+                &input_text[byte_mapping[&symbol.start_byte]..byte_mapping[&symbol.end_byte]],
+            );
+        }
+        output
+    }
+}
+```
+
+While this is a significant improvement over the naive implementation, accessing the left and right symbols of the best pair for merge (and their predecessor/successor) could be optimized further: a total of 2 `get` operations on the binary search tree and the construction of 2 "throwaway" iterators to find the predecessor and successor likely impact the constant factor of the algorithm. The following section proposes a further optimization keeping the same asymptotic complexity but reducing the number of operations performed at each iteration. 
+
+## d. <a name="pq-ll"></a>Priority Queue + Linked List implementation
+
+The previous implementation solves the problem to identifying the best symbols pair to merge without recalculating the entire list at each iteration, but suffers from inefficiencies to select the symbols to execute the merge. This involves the following operations:
+1. Select the left symbol
+2. Select the right symbol
+3. Create a new symbol, combining left and right
+4. Pop the left symbol
+5. Pop the right symbol
+6. Insert the new symbol
+7. Select the left symbol's predecessor, check if it forms a valid pair with the new token
+8. Select the right symbol's successor, check if it forms a valid pair with the new token
+
+These operations seem like a natural fit for a linked list: one can easily access predecessors and successors and replace a sequence of arbitrary nodes by a new element. If the `SymbolPair` element contains pointer to its left and right node, one can even skip scanning the linked list to find the nodes, providing $O(1)$ complexity for all th operations above.
+
+Linked lists are however deceptively simple, and are notoriously difficult to implement while both satisfying Rust's borrow checker and offering a high level of performance. An excellent article [[12]](#too-many-inked-lists) highlights the challenges of implementing linked lists in Rust. Instead, Rust's `Vec` growable array data structure has been thoroughly optimized and is recommended over linked lists for better use of CPU cache in the official Rust documentation [[13]](#rust-linked-list).
+
+The following implementation will implement a `LinkedList` behaviour, storing the _Symbol_ nodes in a Rust `Vec`. This is feasible because while new nodes will be inserted following a merge, they will replace 2 local nodes and the linked list will only shrink following its construction. Our _Symbol_  data structure is modified to contain pointers to the previous and next nodes (which are effectively just a position in the "linked list/vec"). This position pointer is a `isize`, where a `-1` value indicates that a given _Symbol_ has no predecessor/successor (first or last node in the list).
+
+```rust
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct Symbol {
+    pub start_byte: usize,
+    pub end_byte: usize,
+    pub prev: isize,
+    pub next: isize,
+    pub size: usize,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct SymbolPair {
+    pub left: isize,
+    pub right: isize,
+    pub score: i64,
+    pub pair_size: usize,
+}
+```
+
+We have also added a `size` field to both the _Symbol_ and the _SymbolPair_. The reason is that following a merge, we will delete the right _Symbol_, and update the left _Symbol_ in-place to represent the combined _Symbol_ (we don't want to grow the linked list). The pointers of the predecessor and successor _Symbols_ are updated to reflect these changes. However, there is no way to find all _SymbolPair_ that contain a given _Symbol_ (the lookup only works in the other direction). This means that following a merge, some _SymbolPair_ (that were pointing to the left element of the previous _SymbolPair_) are no longer valid: the _Symbol_ at this position has changed (its size increased as a result of combining two symbols). We use the `size` information in the _Symbol_ and _SymbolPair_ as a validation step when popping a new _SymbolPair_ from the agenda: if the `size` of the _SymbolPair_ is smaller than the sum of the `size` of its left and right _Symbols_, this _SymbolPair_ is no longer valid and we ignore it (pop the next _SymbolPair_). The size for all _Symbols_ is initialized as `1` when the linked list is constructed from the character list of the text to tokenize.
+
+##### ToDo: add explanatory schema
+
+The data structure holding the _Symbols_ is now a list, implemented using a Rust `Vec`. It implements the method for merging two symbols (mutates itself) from two symbol positions and a size validation (the merge is executed only if the size validation described above succeeds).
+
+```rust
+pub struct SymbolList {
+    symbols: Vec<Option<Symbol>>,
+}
+
+impl SymbolList {
+    pub fn merge_symbols(
+        &mut self,
+        symbol_1_index: usize,
+        symbol_2_index: usize,
+        size_validation: usize,
+    ) -> Option<Symbol> {
+        if let (Some(left_symbol), Some(right_symbol)) =
+        (self[symbol_1_index], self[symbol_2_index])
+        {
+            if left_symbol.size + right_symbol.size != size_validation {
+                return None;
+            }
+            if right_symbol.next != -1 {
+                if let Some(next_next) = self.symbols.get_mut(right_symbol.next as usize).unwrap() {
+                    next_next.prev = symbol_1_index as isize;
+                }
+            }
+            let new_symbol = Symbol {
+                start_byte: left_symbol.start_byte,
+                end_byte: right_symbol.end_byte,
+                prev: left_symbol.prev,
+                next: right_symbol.next,
+                size: left_symbol.size + right_symbol.size,
+            };
+            self.symbols[symbol_2_index] = None;
+            self.symbols[symbol_1_index] = Some(new_symbol);
+            Some(new_symbol)
+        } else {
+            None
+        }
+    }
+}
+```
+
+The tokenizer method looks very similar to the previous implementations. The `maybe_add_pair` method only changes to calculate the size of a _SymbolPair_ from the sum of its _Symbols_ sizes and is skipped below (see the full code at [[7]](#bpe-code)). One notes that following a pop of the minimum of the _SymbolPair_'s priority queue, accessing the left and right token along with their predecessor and successor is now done by directly looking up the fields `left`, `right` of the _SymbolPair_ and `prev`, `next` of the _Symbols_.
+
+```rust
+impl BpeTokenizer for PriorityQueueBpeLLTokenizer {
+    fn tokenize<'a>(&self, input_text: &'a str) -> Vec<&'a str> {
+        let (text, byte_mapping) = self.pre_process_text(input_text, '▁');
+
+        let mut symbols = SymbolList::from_text(text.as_str());
+        let mut agenda: BinaryHeap<SymbolPair> = BinaryHeap::new();
+
+        for symbol_index in 1..symbols.len() {
+            self.maybe_add_pair(
+                symbol_index as isize - 1,
+                symbol_index as isize,
+                text.as_str(),
+                &symbols,
+                &mut agenda,
+            );
+        }
+
+        while let Some(symbol_pair) = agenda.pop() {
+            let left_symbol_index = symbol_pair.left;
+            let right_symbol_index = symbol_pair.right;
+            if left_symbol_index != -1 && right_symbol_index != -1 {
+                let new_symbol = symbols.merge_symbols(
+                    left_symbol_index as usize,
+                    right_symbol_index as usize,
+                    symbol_pair.pair_size,
+                );
+                if let Some(new_symbol) = new_symbol {
+                    self.maybe_add_pair(
+                        new_symbol.prev,
+                        left_symbol_index,
+                        text.as_str(),
+                        &symbols,
+                        &mut agenda,
+                    );
+                    self.maybe_add_pair(
+                        left_symbol_index,
+                        new_symbol.next,
+                        text.as_str(),
+                        &symbols,
+                        &mut agenda,
+                    );
+                }
+            }
+        }
+
+        let mut output = Vec::new();
+        for symbol in symbols {
+            if let Some(symbol) = symbol {
+                output.push(
+                    &input_text[byte_mapping[&symbol.start_byte]..byte_mapping[&symbol.end_byte]],
+                );
+            }
+        }
+        output
+    }
+}
+```
 
 
 ## References
@@ -404,3 +630,6 @@ with Deep Learning, CS224N/Ling284, lecture 12](https://web.stanford.edu/class/c
 - <a name="fastbpe"></a>[9] [fastBPE](https://github.com/glample/fastBPE)
 - <a name="sentencepiece-paper"></a>[10] [SentencePiece: A simple and language independent subword tokenizer and detokenizer for Neural Text Processing](https://arxiv.org/abs/1808.06226), Taku Kudo, John Richardson
 - <a name="sentencepiece-bpe"></a>[11] [SentencePiece BPE model](https://github.com/google/sentencepiece/blob/master/src/bpe_model.cc), Taku Kudo
+- <a name="too-many-linked-lists"></a>[12] [Learn Rust With Entirely Too Many Linked Lists](https://rust-unofficial.github.io/too-many-lists/)
+- <a name="rust-linked-list"></a>[13] [Rust std LinkedList documentation](https://doc.rust-lang.org/std/collections/struct.LinkedList.html)
+
