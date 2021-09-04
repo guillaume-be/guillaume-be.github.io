@@ -144,7 +144,7 @@ The rest of this article consists of a walk-through a number of working implemen
 - [Naive implementation](#naive)
 - [Naive implementation with pre-splitting](#naive-pre-split)
 - [Priority Queue + Binary Search Tree implementation](#pq-bst)
-- Priority Queue + Linked List implementation
+- [Priority Queue + Linked List implementation](#pq-ll)
 
 ## a. <a name="naive"></a>Naive implementation
 
@@ -511,7 +511,8 @@ pub struct SymbolPair {
 
 We have also added a `size` field to both the _Symbol_ and the _SymbolPair_. The reason is that following a merge, we will delete the right _Symbol_, and update the left _Symbol_ in-place to represent the combined _Symbol_ (we don't want to grow the linked list). The pointers of the predecessor and successor _Symbols_ are updated to reflect these changes. However, there is no way to find all _SymbolPair_ that contain a given _Symbol_ (the lookup only works in the other direction). This means that following a merge, some _SymbolPair_ (that were pointing to the left element of the previous _SymbolPair_) are no longer valid: the _Symbol_ at this position has changed (its size increased as a result of combining two symbols). We use the `size` information in the _Symbol_ and _SymbolPair_ as a validation step when popping a new _SymbolPair_ from the agenda: if the `size` of the _SymbolPair_ is smaller than the sum of the `size` of its left and right _Symbols_, this _SymbolPair_ is no longer valid and we ignore it (pop the next _SymbolPair_). The size for all _Symbols_ is initialized as `1` when the linked list is constructed from the character list of the text to tokenize.
 
-##### ToDo: add explanatory schema
+![Linked list symbol merge](../assets/bpe/bpe_schematics.svg "Size validation following Symbols merge")
+
 
 The data structure holding the _Symbols_ is now a list, implemented using a Rust `Vec`. It implements the method for merging two symbols (mutates itself) from two symbol positions and a size validation (the merge is executed only if the size validation described above succeeds).
 
