@@ -617,6 +617,44 @@ impl BpeTokenizer for PriorityQueueBpeLLTokenizer {
 }
 ```
 
+# 3. Benchmarks
+
+So far we have compared implementation on a theoretical complexity level. In reality, the constants hidden in the asymptotic behaviour can be significant. This section reports experimental results taking samples of varying size of Shakespeare's Hamlet [[14]](#hamlet). The time taken to tokenize the first 1, 10, 100 or 1000 lines of the play is recorded for the 4 implementations presented previously:
+
+<style>
+table th:first-of-type {
+    width: 20%;
+}
+table th:nth-of-type(2) {
+    width: 10%;
+}
+table th:nth-of-type(3) {
+    width: 20%;
+}
+table th:nth-of-type(4) {
+    width: 30%;
+}
+table th:nth-of-type(5) {
+    width: 30%;
+}
+</style>
+
+| Input size | Naive | Naive <br>(pre-split) | Priority Queue + <br>Binary Search Tree | Priority Queue + Linked List |
+|:------------|:-------|:------------------- |:-------------------------------------   |:-----------------------------|
+| 1          | 27.1 $\mu$s | 9.1 $\mu$s      | 14.7 $\mu$s                             | 8.6 $\mu$s                   |
+| 10         | 162 $\mu$s  | 26.5 $\mu$s     | 54.4 $\mu$s                             | 24.7 $\mu$s                  |
+| 100        | 85 ms       | 0.57 ms         | 1.76 ms                                 | 0.68 ms                      |
+| 1000       | 18.6 s      | 8.6 ms          | 33.9 ms                                 | 12.8 ms                       |
+
+This confirms the expectations derived from the algorithms earlier: the naive approach becomes unpractical for inputs starting at 100 lines. Meanwhile, all other approaches stay in the order of a millisecond even for inputs that are 1000 lines long, confirming the asymptotic benefits of the data structure derived. We also see that the two exact solutions leveraging priority queues provide execution times that are in line with the pre-split approximation. Even though they have the same asymptotic complexity, we also note that the linked-list implementation for the `Symbols` outperforms the binary search tree version.
+
+These results, along with asymptotic trend-lines, can be seen in the figure below:
+
+![BPE implementations benchmark](../assets/bpe/bpe_benchmark.svg "BPE implementations benchmark")
+
+# Conclusion
+
+Byte pair Encoding is a tokenization method that is in essence very simple and effective as a pre-processing step for modern machine learning pipelines. While it can be widely found in multiple productive libraries, its actual implementation can vary significantly from one source to another. This article provides an overview of some key implementations of the algorithm that the reader may encounter and provides a high-level intuition behind their design. It illustrates the impact that the choice of a data structure can have on the execution runtime of the same high-level tokenization algorithm in a real application that is used everyday by thousands of data scientists and machine learning engineers. The priority-queue / linked-list implementation of Byte pair Encoding has been implemented in the rust-tokenizers library [[15]](#rust-tokenizers), along with other modern tokenization algorithms.
 
 ## References
 - <a name="bpe"></a>[1] [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909), Rico Sennrich, Barry Haddow, Alexandra Birch, 2015 
@@ -633,4 +671,5 @@ with Deep Learning, CS224N/Ling284, lecture 12](https://web.stanford.edu/class/c
 - <a name="sentencepiece-bpe"></a>[11] [SentencePiece BPE model](https://github.com/google/sentencepiece/blob/master/src/bpe_model.cc), Taku Kudo
 - <a name="too-many-linked-lists"></a>[12] [Learn Rust With Entirely Too Many Linked Lists](https://rust-unofficial.github.io/too-many-lists/)
 - <a name="rust-linked-list"></a>[13] [Rust std LinkedList documentation](https://doc.rust-lang.org/std/collections/struct.LinkedList.html)
-
+- <a name="hamlet"></a>[14] [The Tragedy of Hamlet, Prince of Denmark](http://shakespeare.mit.edu/hamlet/full.html), William Shakespeare
+- <a name="rust-tokenizers"></a>[15] [rust-tokenizers](https://github.com/guillaume-be/rust-tokenizers)
