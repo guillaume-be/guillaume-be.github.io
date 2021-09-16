@@ -4,29 +4,31 @@ title: "Byte Pair Encoding and Data Structures"
 author: "Guillaume"
 ---
 
-Tokenization of input strings into a sequence of word or sub-tokens is a central concept for modern Natural Language Processing techniques (NLP). This article proposes an implementation of a classic tokenization algorithm: Byte Pair Encoding (BPE) [[1]](#bpe). Multiple algorithms and their implementation in Rust will illustrate how the choice of data structures impact the performance of a real-world NLP component.
+Tokenization of input strings into sequences of words or sub-tokens is a central concept for modern Natural Language Processing techniques (NLP). This article focuses on a classic tokenization algorithm: Byte Pair Encoding (BPE) [[1]](#bpe). While resources describing the working principle of the algorithm are widely available, this article focuses on its implementation, illustrating how the choice of data structures impact the performance of a real-world NLP component. This article is complemented by a working Rust-based implementation, <a href="https://github.com/guillaume-be/bpe-example" target="_blank">available on GitHub</a>.
 
 # Introduction
 
-Straight-forward word-based segmentation has been a de-facto pre-processing standard step for years. When combined with n-grams computation, one-hot-encoding, frequency weighting (such as term frequency - inverse document frequency, tf-idf [[2]](#tf-idf)) or dense word embeddings (such as GloVe [[3]](#glove)). Word-based tokenization simplicity needs to be balanced by a few important drawbacks: because the total number of words in most languages' vocabulary is very large (including very large words), this approach will either result in very large input dimensionality (very broad - although sparse - frequency matrices or very long embeddings matrices) or will rely on converting tokens that were pruned from the vocabulary by an "unknown" token. Even when including the entire valid vocabulary for the generation of these encoding matrices, common input corruption such as typos will result in out-of-vocabulary inputs. Improved techniques, such as FastText embeddings [[4]](#fasttext) allow using word-based inputs augmented with sub-word information, handling high morphology languages and rare words better.
+Tokenization consists in splitting an input sequence (e.g., a sentence) into a sequence of tokens with a finite cardinality (for example words or individual characters). These tokens can then be encoded and processed further by machine learning components such as neural networks. 
 
-At the other end of the spectrum, character-based tokenization usually allows for a very small encoding matrix at the cost of a lower representation power: by splitting the input into a sequence of characters or unicode points, one can ensure a full conversion of the input without loss of information ("unknown" tokens). The cost is a low semantic information content of such characters, and the need to rely on powerful downstream models to generate meaningful features. This has been successfully illustrated in approaches such as CANINE [[5]](#canine).
+Halfway between word-based tokenization and character input, sub-word tokenization aims at combining the benefits of both approaches:
+- The tokens generated carry a semantic content that is close to words (and richer than individual characters)
+- They allow for smaller vocabulary sizes, driving memory efficiency and increased representation sharing
 
-Halfway between word-based tokenization and character input, sub-word tokenization aims at combining the benefits of both approaches. Sub-word tokenization works by splitting rare words into sub-word components instead of ignoring them or having a seldom-used dedicated representation for them. Ideally, these sub-word representation result in a segmentation that is also semantically or syntactically meaningful, for example splitting pre- or suffixes from words (for example, `unexpected` would become `[un, ##expected]`). This is in practice not always the case and depends on the sub-word segmentation algorithm and the corpus used for training. The resulting vocabulary size can be an order of magnitude smaller than for word-based segmentation while common words will be represented as a single entry - allowing to generate semantically-rich word embeddings for the downstream model.
+Sub-word tokenization works by splitting rare words into sub-word components instead of ignoring them or having a seldom-used dedicated representation for them. Ideally, these sub-word representations are semantically or syntactically meaningful, for example by splitting pre- or suffixes from words (`unexpected` may become `[un, ##expected]`). The resulting vocabulary size can be an order of magnitude smaller than for word-based segmentation while keeping common words as single entries - allowing to generate semantically-rich word embeddings for the downstream model.
 
 These models usually have two algorithmic components: 
-- a training component, where a vocabulary and rules to merge/split words is learned using an unsupervised algorithm.
-- a prediction component, where these rules are used to split an input sentence or documents into a sequence of words/sub-tokens.
+- a training phase, where a vocabulary and rules to merge/split words are learned with an unsupervised algorithm.
+- a prediction phase, where these rules are used to split an input sentence or documents into a sequence of words/sub-tokens.
 
-While proper algorithmic design of the training phase is important to allow scaling to larger corpora, this is a one-off cost. This article focuses on the design and implementation of the prediction phase which is critical to limit the latency and operation cost of models when they are deployed and generate production. Following a previous article illustrating the [SentencePiece unigram tokenization model](../2020-05-30/sentence_piece), this article will focus on another ubiquitous algorithm: Byte Pair Encoding (BPE).
+While proper algorithmic design of the training phase is important to allow scaling to larger corpora, this is a one-off cost. This article focuses on the design and implementation of the prediction phase which is critical to limit the latency and operation cost of models when they are deployed and generate production. Following a previous article illustrating the <a href="../2020-05-30/sentence_piece" target="_blank">SentencePiece unigram tokenization model</a>, this article will focus on another ubiquitous algorithm: Byte Pair Encoding (BPE).
 
 # 1. The Byte Pair Encoding (BPE) tokenizer
 
-In contrast with SentencePiece statistical unigram model, BPE is a morphological tokenizer that merges adjacent byte pairs based on their frequency in a training corpus. Based on a compression algorithm with the same name, BPE has been adapted to sub-word tokenization that can be thought of as a clustering algorithm [[6]](#bpe-lecture). A starting sequence of individual characters will be aggregated bottom-up based on frequencies learned during a training phase. When no further aggregation is possible, end the process and return the sub-words generated. 
+BPE is a morphological tokenizer that merges adjacent byte pairs based on their frequency in a training corpus. Based on a compression algorithm with the same name, BPE has been adapted to sub-word tokenization and can be thought of as a clustering algorithm [[6]](#bpe-lecture). A starting sequence of individual characters will be aggregated bottom-up based on frequencies learned during a training phase. When no further aggregation is possible, end the process and return the sub-words generated. 
 
-Once can note that no unknown tokens can occur as an output of this process as long as all individual characters are present in the vocabulary (in the worst case, the sequence of individual characters will be returned). With a sufficiently large vocabulary, the most common words will be fully aggregated and the entire sequence of input characters will be returned as a single word token. Rare words will be returned as a list of sub-tokens that can no longer be aggregated.
+No unknown tokens can occur as an output of this process as long as all individual characters are present in the vocabulary (in the worst case, the sequence of individual characters will be returned). With a sufficiently large vocabulary, the most common words will be fully aggregated and the entire sequence of input characters will be returned as a single word token. Rare words will be returned as a list of sub-tokens that can no longer be aggregated.
 
-## Tokenization (prediction)
+## Prediction phase (tokenization)
 
 Even though the BPE model needs to be trained before it can be used, we will first describe how it is used to tokenize an input sequence at prediction time in this article. This will help build an intuition on how the algorithm decomposes words into sub-tokens.
 
@@ -72,7 +74,8 @@ The tokenization algorithm is as follows:
 \end{algorithm}
 " %}
 
-`merges` is a learned mapping of symbol pairs to score that is learned during a training phase (see next section). The following example illustrates how a merges vocabulary (mapping of symbols that may be aggregated with their frequency) is used to tokenize 2 words. Note that in practice, a `</w>` symbol is appended at the end of the initial word character decomposition and included in the merges vocabulary to differentiate end of words symbols.
+`merges` is a learned mapping of symbol pairs to score that is learned during a training phase (see next section). A `Symbol` is a sub-token of a given input, which may be a character, multiple consecutive characters that have been merged or the entire word. The following example illustrates how a merges vocabulary (mapping of symbols that may be aggregated with their frequency) is used to tokenize 2 words. The symbol pairs with higher frequencies are merged first:
+
 ```json
 {
   "e r": 25,
@@ -85,14 +88,14 @@ The tokenization algorithm is as follows:
 }
 ```
 - "lower" would follow the following aggregation steps: <br>
-`[l, o, w, e, r] -> [l, o, w, er] -> [lo, w, er] -> [low, er]` (`"low er"` not in merges vocabulary, causing an early stopping of the tokenization procedure at line _26_)
+`[l, o, w, e, r] -> [l, o, w, er] -> [lo, w, er] -> [low, er]` (`"low er"` is not in the merges vocabulary, causing an early stopping of the tokenization procedure at line _26_)
 
 - "hello" would be tokenized as: <br>
 `[h, e, l, l, o] -> [he, l, l, o] -> [he, ll, o] -> [hell, o] -> [hello]`
 
-## Training
+## Training phase
 
-For computational efficiency, BPE training relies on a pre-tokenizer (e.g. whitespace tokenizer) in order to generate a dictionary with word frequencies (the original BPE algorithm does not allow cross-word merges). This word counter is used to initialize a counter of adjacent "bytes" (symbols) pairs that may be merged. This "symbol pairs" counter is used to create a new symbol in the dictionary, update the symbol pairs counts and repeat until the target vocabulary size is reached. As such, BPE is an  algorithm that grows its vocabulary at each iteration (in contrast with SentencePiece unigram's model that prunes a large vocabulary at each iteration).
+For computational efficiency, BPE training relies on a pre-tokenizer (e.g. whitespace tokenizer) in order to generate a dictionary with word frequencies (the original BPE algorithm does not allow cross-word merges). This word counter is used to initialize a counter of symbol pairs of adjacent characters that may be merged. After the count completes, the most frequent "symbol pair" is merged to create a new symbol in the dictionary, the symbol pairs counts  in the corpus are updated and the process repeats until the target vocabulary size is reached. As such, BPE is an algorithm that grows its vocabulary at each iteration (in contrast with SentencePiece unigram's model that prunes a large vocabulary at each iteration).
 
 The entire training algorithm is rather straight-forward and given below (reproduced from [[1]](#bpe)).
 
@@ -138,7 +141,7 @@ The algorithm above can be improved as described in [[1]](#bpe) by updating data
 
 # 2. Rust implementation(s) of the BPE algorithm
 
-The rest of this article consists of a walk-through a number of working implementations of the BPE tokenization algorithm in Rust. Starting from a "naive" implementation approach, improvements will be made to highlight pros and cons of some common data structures within the scope of BPE tokenization.
+The rest of this article consists of a walk-through of a number of working implementations of the BPE tokenization algorithm in Rust. Starting from a "naive" implementation approach, improvements will be made to highlight pros and cons of some common data structures within the scope of BPE tokenization.
 
 4 algorithms for the BPE tokenization will be presented:
 - [Naive implementation](#naive)
@@ -148,11 +151,11 @@ The rest of this article consists of a walk-through a number of working implemen
 
 ## a. <a name="naive"></a>Naive implementation
 
-Let's begin with a direct implementation of [[algorithm 1]](#bpe-tokenization-naive), which consists in 2 main procedures:
+Let's begin with a direct implementation of [[algorithm 1]](#bpe-tokenization-naive), which consists in 2 main procedures within a loop:
 1. Find the best merge
-2. Apply the best merge
+2. Apply the best merge 
 
-Until no valid merge can be found. Let's examine the algorithm complexity, where _N_ represents the number of characters of an input text. Assuming a lookup in the merges mapping can be done in constant time (a fair assumption for a standard hashmap implementation), the `FindBestPair` procedure has a $O(N)$ complexity (_symbols_ is of length _N_ for the first iteration). Similarly, the `MergeBestPair` has a $O(N)$ complexity if the `Merge` operation can be done in constant time. The main `Tokenize` procedure will iterate until no further merge can be found, which will result in _N-1_ merges in the "worst" case (if the entire word exists in the vocabulary). This results in a combined complexity of $O(N^{2})$. This motivates the pre-tokenization (e.g. whitespace splitting) step that usually precedes BPE tokenization, so that _N_ is the typical length of a word rather than a full sentence/document.
+Let's examine the algorithm complexity, where _N_ represents the number of characters of an input text. Assuming a lookup in the merges mapping can be done in constant time (a fair assumption for a standard hashmap implementation), the `FindBestPair` procedure has a $O(N)$ complexity (_N-1_ pair candidates need to be checked for the first iteration). The `MergeBestPair` has a $O(N)$ complexity if the `Merge` operation can be done in constant time if we allow for multiple merges per iteration, otherwise $O(1)$. The main `Tokenize` procedure will iterate until no further merge can be found, which will result in _N-1_ merges in the "worst" case (if the entire word exists in the vocabulary). This results in a combined complexity of $O(N^{2})$. This motivates the pre-tokenization (e.g. whitespace splitting) step that usually precedes BPE tokenization, so that _N_ is the typical length of a word rather than a full sentence/document.
 
 Let's look at a Rust implementation of this algorithm. The following code has been edited to focus on the critical parts of the algorithm. The full working version can be found at [[7]](#bpe-code). Let's start by defining `Symbols`, the data structure representing a sub-token:
 
@@ -164,7 +167,7 @@ pub struct Symbol {
 }
 ```
 
-A symbol contains information related to the start and end byte positions of the sub-token. This is lighter than working with string slices (or significantly faster than string clones) and convenient for the operations we expect on `Symbols` (merges and lookups). We will not manipulate `Symbols` on their own, but rather work on a collection of `Symbols`. The naive implementation, looping over the list of symbols indicates a Rust `Vec` may be an appropriate structure to use:
+A symbol contains information related to the start and end byte positions of the sub-token. This is lighter than working with string slices (and significantly faster than string clones). It is also convenient for the operations we expect on `Symbols` (merges and lookups). We will not manipulate `Symbols` on their own, but rather work on a collection of `Symbols`. The naive implementation, looping over the list of symbols indicates a Rust `Vec` may be appropriate:
 
 ```rust
 pub struct SymbolArray {
@@ -172,9 +175,9 @@ pub struct SymbolArray {
 }
 ```
 
-The symbols are initialized from the characters of the input text (see algorithm 1, line _21_). We will create a method `from_text` that populates the initial `SymbolArray` from a string slice. Note that we look up character byte indices so that we handle characters that span over multiple UTF-8 bytes correctly.
+The symbols are initialized from the characters of the input text (see algorithm 1, line _21_). We will create a method `from_text` that populates the initial `SymbolArray` from a string slice. Note that we look up character byte indices so that we can handle characters that span over multiple UTF-8 bytes correctly.
 
-We also implement a method for finding the best pair to merge (given a tokenizer/merge dictionary) that will return an optional position of the best pair in the `SymbolArray`. When this method return `None`, we know that the array can no longer be merged. Finally, we implement directly a method to merge a pair of symbols mutating the SymbolArray inplace. This method will take the best pair position as an input to directly insert the merged pair and remove the two parents.
+We also implement a method for finding the best pair to merge (given a tokenizer/merge dictionary) that will return an optional position of the best pair in the `SymbolArray`. When this method return `None`, we know that the array can no longer be merged. Finally, we implement directly a method to merge a pair of symbols mutating the `SymbolArray` inplace. This method will take the best pair position as an input to directly insert the merged pair and remove the two parents.
 
 ```rust
 impl SymbolArray {
@@ -250,9 +253,9 @@ As mentioned previously, this algorithm has a $O(N^{2})$ complexity where N repr
 
 ## b. <a name="naive-pre-split"></a>Pre-splitting naive implementation
 
-The previous implementation can easily be extended to include a pre-tokenization step. This is actually the standard BPE implementation in several widely used packages, such as subword-nmt (Python) [[8]](#subword-nmt) or fastBPE (C++) [[9]](#fastbpe). By pre-tokenizing the sequence (for example whitespace splitting), one can effectively limit the average size of the inputs passed for BPE tokenization. A whitespace splitting will pass single words for processing. For most languages, the expected size of a word _M_ is much smaller than the number of characters in an average sentence or document _N_ (although after living in Germany for 10 years, the author realizes this hypothesis may be optimistic at times). The complexity of the tokenization for a word is $O(M^{2})$. Splitting the sequence into words using a simple whitespace/punctuation rule has a $O(N)$ complexity, resulting in a number of words that is at most _N_, meaning the algorithm complexity is $O(N) + O(N*M^{2}) = O(N)$ if $M \ll N$.
+The previous implementation can easily be extended to include a pre-tokenization step. This is actually the standard BPE implementation in several widely used packages, such as subword-nmt (Python) [[8]](#subword-nmt) or fastBPE (C++) [[9]](#fastbpe). By pre-tokenizing the sequence (for example whitespace splitting), one can effectively limit the average size of the inputs passed for BPE tokenization. A whitespace splitting will pass single words for processing. For most languages, the expected size of a word _M_ is much smaller than the number of characters _N_ in an average sentence or document (although after living in Germany for 10 years, the author realizes this hypothesis may be optimistic at times). The complexity of the tokenization for a word is $O(M^{2})$. Splitting the sequence into words using a simple whitespace/punctuation rule has a $O(N)$ complexity, resulting in a number of words that is at most _N_, meaning the algorithm complexity is $O(N) + O(N*M^{2}) = O(N)$ if $M \ll N$.
 
-To implement this tokenizer, the `Tokenizer` has an additional method for whitespace/punctuation tokenization. Punctuation are returned as a single character word, and other words contain the leading whitespace character if applicable. The method returns a vector of string slices:
+To implement this tokenizer, the `Tokenizer` has an additional method for whitespace/punctuation tokenization. Punctuation marks are returned as a single character word, and other words contain the leading whitespace character if applicable. The method returns a vector of string slices:
 
 ```rust
 impl NaivePreSplitBpeTokenizer {
@@ -342,7 +345,7 @@ By implementing the following data structures:
 - Binary Search Tree for the _Symbols_
 - Min Heap for the _SymbolPairs_,
 
-A worst-case complexity of $O(N(\log(N) + \log(N)))$ = $O(N\log(N))$, significantly better than the initial $O(N^{2})$. The maintenance of a priority queue for the _SymbolPairs_ to process is mentioned in the SentencePiece article [[10]](#sentencepiece-paper) and is used in the optimized BPE implementation of the C++ SentencePiece library [[11]](#sentencepiece-bpe). _Algorithm 1_ (BPE tokenization) becomes:
+A worst-case complexity of $O(N(\log(N) + \log(N)))$ = $O(N\log(N))$ can be achieved, significantly better than the initial $O(N^{2})$. The maintenance of a priority queue for the _SymbolPairs_ to process is mentioned in the SentencePiece article [[10]](#sentencepiece-paper) and is used in the optimized BPE implementation of the C++ SentencePiece library [[11]](#sentencepiece-bpe). _Algorithm 1_ (BPE tokenization) becomes:
 
 {% include pseudocode.html id="2" code="
 \begin{algorithm}
@@ -390,7 +393,7 @@ A worst-case complexity of $O(N(\log(N) + \log(N)))$ = $O(N\log(N))$, significan
 
 Lines _17_ to _21_ initialize both the _Symbols_ and _SymbolPairs_ data structures. At each iteration, the best _SymbolPair_ is popped from the priority queue (line _23_). The check on line _27_ is required as instead of manually removing invalid merges following a merge (if the first 2 elements of a triplets get merged, the pair information for the last 2 elements is no longer valid), we pop pairs from the _SymbolPairs_ and then check their validity. If the pair is still valid, we proceed to merge and check if new pairs should be added (lines _31_ and _32_).
 
-Similarly to the _SymbolsArray_, the Rust implementation for the _Symbols_ Binary Search Tree contains a method mutate itself and merge two symbols:
+Similarly to the _SymbolsArray_, the Rust implementation for the _Symbols_ Binary Search Tree contains a method to mutate itself and merge two symbols:
 
 ```rust
 pub struct SymbolBTree {
@@ -478,13 +481,13 @@ The previous implementation solves the problem to identifying the best symbols p
 1. Select the left symbol
 2. Select the right symbol
 3. Create a new symbol, combining left and right
-4. Pop the left symbol
-5. Pop the right symbol
+4. Remove the left symbol
+5. Remove the right symbol
 6. Insert the new symbol
 7. Select the left symbol's predecessor, check if it forms a valid pair with the new token
 8. Select the right symbol's successor, check if it forms a valid pair with the new token
 
-These operations seem like a natural fit for a linked list: one can easily access predecessors and successors and replace a sequence of arbitrary nodes by a new element. If the `SymbolPair` element contains pointer to its left and right node, one can even skip scanning the linked list to find the nodes, providing $O(1)$ complexity for all th operations above.
+These operations seem like a natural fit for a linked list: one can easily access predecessors and successors and replace a sequence of arbitrary nodes by a new element. If the `SymbolPair` element contains pointer to its left and right node, one can even skip scanning the linked list to find the nodes, providing $O(1)$ complexity for all of the operations above.
 
 Linked lists are however deceptively simple, and are notoriously difficult to implement while both satisfying Rust's borrow checker and offering a high level of performance. An excellent article [[12]](#too-many-inked-lists) highlights the challenges of implementing linked lists in Rust. Instead, Rust's `Vec` growable array data structure has been thoroughly optimized and is recommended over linked lists for better use of CPU cache in the official Rust documentation [[13]](#rust-linked-list).
 
@@ -509,7 +512,7 @@ pub struct SymbolPair {
 }
 ```
 
-We have also added a `size` field to both the _Symbol_ and the _SymbolPair_. The reason is that following a merge, we will delete the right _Symbol_, and update the left _Symbol_ in-place to represent the combined _Symbol_ (we don't want to grow the linked list). The pointers of the predecessor and successor _Symbols_ are updated to reflect these changes. However, there is no way to find all _SymbolPair_ that contain a given _Symbol_ (the lookup only works in the other direction). This means that following a merge, some _SymbolPair_ (that were pointing to the left element of the previous _SymbolPair_) are no longer valid: the _Symbol_ at this position has changed (its size increased as a result of combining two symbols). We use the `size` information in the _Symbol_ and _SymbolPair_ as a validation step when popping a new _SymbolPair_ from the agenda: if the `size` of the _SymbolPair_ is smaller than the sum of the `size` of its left and right _Symbols_, this _SymbolPair_ is no longer valid and we ignore it (pop the next _SymbolPair_). The size for all _Symbols_ is initialized as `1` when the linked list is constructed from the character list of the text to tokenize.
+We have also added a `size` field to both the _Symbol_ and the _SymbolPair_. The reason is that following a merge, we will delete the right _Symbol_, and update the left _Symbol_ in-place to represent the combined _Symbol_ (we don't want to grow the linked list). The pointers of the predecessor and successor _Symbols_ are updated to reflect these changes. However, there is no way to find all _SymbolPairs_ that contain a given _Symbol_ (the lookup only works in the other direction). This means that following a merge, some _SymbolPair_ (that were pointing to the left element of the previous _SymbolPair_) are no longer valid: the _Symbol_ at this position has changed (its size increased as a result of combining two symbols). We use the `size` information in the _Symbol_ and _SymbolPair_ as a validation step when popping a new _SymbolPair_ from the agenda: if the `size` of the _SymbolPair_ is smaller than the sum of the `size` of its left and right _Symbols_, this _SymbolPair_ is no longer valid and we ignore it (pop the next _SymbolPair_). The size for all _Symbols_ is initialized as `1` when the linked list is constructed from the character list of the text to tokenize.
 
 ![Linked list symbol merge](../assets/bpe/bpe_schematics.svg "Size validation following Symbols merge")
 
@@ -556,7 +559,7 @@ impl SymbolList {
 }
 ```
 
-The tokenizer method looks very similar to the previous implementations. The `maybe_add_pair` method only changes to calculate the size of a _SymbolPair_ from the sum of its _Symbols_ sizes and is skipped below (see the full code at [[7]](#bpe-code)). One notes that following a pop of the minimum of the _SymbolPair_'s priority queue, accessing the left and right token along with their predecessor and successor is now done by directly looking up the fields `left`, `right` of the _SymbolPair_ and `prev`, `next` of the _Symbols_.
+The tokenizer method looks very similar to the previous implementations. The `maybe_add_pair` method only changes to calculate the size of a _SymbolPair_ from the sum of its _Symbols_ sizes and is skipped below (see the full code at [[7]](#bpe-code)). Accessing the left and right token of a _SymbolPair_, along with their predecessor and successor is now done by directly looking up the fields `left`, `right` of the _SymbolPair_ and `prev`, `next` of the _Symbols_.
 
 ```rust
 impl BpeTokenizer for PriorityQueueBpeLLTokenizer {
@@ -619,7 +622,7 @@ impl BpeTokenizer for PriorityQueueBpeLLTokenizer {
 
 # 3. Benchmarks
 
-So far we have compared implementation on a theoretical complexity level. In reality, the constants hidden in the asymptotic behaviour can be significant. This section reports experimental results taking samples of varying size of Shakespeare's Hamlet [[14]](#hamlet). The time taken to tokenize the first 1, 10, 100 or 1000 lines of the play is recorded for the 4 implementations presented previously:
+So far we have compared the implementations on a theoretical complexity level. In reality, the constants hidden in the asymptotic behaviour can have a significant impact. This section reports experimental results taking samples of varying size of Shakespeare's Hamlet [[14]](#hamlet). The time taken to tokenize the first 1, 10, 100 or 1000 lines of the play is recorded for the 4 implementations presented previously:
 
 <style>
 table th:first-of-type {
@@ -646,7 +649,7 @@ table th:nth-of-type(5) {
 | 100        | 85 ms       | 0.57 ms         | 1.76 ms                                 | 0.68 ms                      |
 | 1000       | 18.6 s      | 8.6 ms          | 33.9 ms                                 | 12.8 ms                       |
 
-This confirms the expectations derived from the algorithms earlier: the naive approach becomes unpractical for inputs starting at 100 lines. Meanwhile, all other approaches stay in the order of a millisecond even for inputs that are 1000 lines long, confirming the asymptotic benefits of the data structure derived. We also see that the two exact solutions leveraging priority queues provide execution times that are in line with the pre-split approximation. Even though they have the same asymptotic complexity, we also note that the linked-list implementation for the `Symbols` outperforms the binary search tree version.
+This confirms the expectations derived from the algorithms earlier: the naive approach becomes unpractical for inputs lengths exceeding 100 lines. Meanwhile, all other approaches stay in the order of a millisecond even for inputs that are 1000 lines long, confirming the asymptotic benefits of the data structures investigated. We also see that the two exact solutions leveraging priority queues provide execution times that are in line with the pre-split approximation. Even though they have the same asymptotic complexity, we also note that the linked-list implementation for the `Symbols` outperforms the binary search tree version.
 
 These results, along with asymptotic trend-lines, can be seen in the figure below:
 
@@ -654,7 +657,7 @@ These results, along with asymptotic trend-lines, can be seen in the figure belo
 
 # Conclusion
 
-Byte pair Encoding is a tokenization method that is in essence very simple and effective as a pre-processing step for modern machine learning pipelines. While it can be widely found in multiple productive libraries, its actual implementation can vary significantly from one source to another. This article provides an overview of some key implementations of the algorithm that the reader may encounter and provides a high-level intuition behind their design. It illustrates the impact that the choice of a data structure can have on the execution runtime of the same high-level tokenization algorithm in a real application that is used everyday by thousands of data scientists and machine learning engineers. The priority-queue / linked-list implementation of Byte pair Encoding has been implemented in the rust-tokenizers library [[15]](#rust-tokenizers), along with other modern tokenization algorithms.
+Byte pair Encoding is a tokenization method that is in essence very simple and effective as a pre-processing step for modern machine learning pipelines. Widely used in multiple productive libraries, its actual implementation can vary significantly from one source to another. This article gives an overview of some key implementations of the algorithm that the reader may encounter and provides a high-level intuition behind their design. It illustrates the impact that the choice of a data structure can have on a real NLP application that is used everyday by thousands of data scientists and machine learning engineers. The priority-queue / linked-list implementation of Byte pair Encoding has been implemented in the rust-tokenizers library [[15]](#rust-tokenizers), along with other modern tokenization algorithms.
 
 ## References
 - <a name="bpe"></a>[1] [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909), Rico Sennrich, Barry Haddow, Alexandra Birch, 2015 
