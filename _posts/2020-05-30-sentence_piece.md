@@ -50,28 +50,49 @@ The SentencePiece unigram model aims at maximizing the likelihood of a unigram l
 
 Encoding (the focus of this article) is used during the training maximization step of EM and at inference in order to encode a new input text. The encoding is done using the [Viterbi decoding algorithm](https://en.wikipedia.org/wiki/Viterbi_algorithm) consisting of 2 macro steps: a forward step (where the possible sub-tokens are identified) and a backward step (where the most likely decoding sequence is identified). These steps are described in detail in this [excellent article](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html). 
 
-1. The forward steps identifies the sub-token with the highest probability at each character position of the word. The result at the end of the forward pass is a list of best sub-tokens ending at each character position of the input string. Note that this best sub-token at a given ending character position takes into account the raw likelihood of the sub-token *and* the likelihood of the best token sequence leading to it (as opposed to the probability provided in the vocabulary that does not consider the surrounding context). The Viterbi algorithm uses the fact that the likelihood of a token ending at character position `end_idx` and starting at position `start_idx`, is given by $$\mathcal{L}(Best\:sequence\:up\:to\:start\:idx) + \mathcal{L}(subtoken)$$. Two methods for this forward pass will be described in the following with a proposed implementation in Rust. In both case the high level algorithm forward pass accomplishes the following:
+The forward steps identifies the sub-token with the highest probability at each character position of the word. The result at the end of the forward pass is a list of best sub-tokens ending at each character position of the input string. Note that this best sub-token at a given ending character position takes into account the raw likelihood of the sub-token *and* the likelihood of the best token sequence leading to it (as opposed to the probability provided in the vocabulary that does not consider the surrounding context). The Viterbi algorithm uses the fact that the likelihood of a token ending at character position `end_idx` and starting at position `start_idx`, is given by $$\mathcal{L}(Best\:sequence\:up\:to\:start\:idx) + \mathcal{L}(subtoken)$$. Two methods for this forward pass will be described in the following with a proposed implementation in Rust. 
 
-~~~
-1. initialize best_ending_subtokens = [None] * len(input)
-1. For end_idx in [0:len(input)]:
-    best_ending_subtokens[end_idx] = identify_best_token_ending_at(end_idx)
-~~~
-the `identify_best_token_ending_at` method is described in the following sections of this article. 
+In both case the high level algorithm forward pass accomplishes the following:
 
-2. The backward pass takes this list of most likely tokens ending at each position to decode the sequence starting from the end and building its way back to the beginning.
+<a name="viterbi-forward"></a>
+{% include pseudocode.html id="0" code="
+\begin{algorithm}
+\caption{Forward pass}
+\begin{algorithmic}
+\PROCEDURE{Forward}{$input$, $scores$}
+    \STATE $best\:ending\:subtokens$ = [nil] * \CALL{Len}{$input$}
+    \FOR{$i = 0$ \TO $len(input)$}
+        \STATE $best\:ending\:subtokens[i]$ = \CALL{BestPrefix}{$input$, $i$, $scores$}
+    \ENDFOR    
+    \RETURN ($best\:ending\:subtokens$)
+\ENDPROCEDURE
+\end{algorithmic}
+\end{algorithm}
+" %}
 
-~~~
-end = len(input)
-best_tokens = viterbi_forward(input) (list of size N with best ending token at each character position)
-sub_tokens = []
-While end > 0:
-    best_token_len = best_tokens[end]
-    sub_tokens.push(best_token_len)
-    end = end - len(best_token_len) 
-End while
-reverse(sub_tokens)
-~~~
+the _BestPrefix_ procedure is described in the following sections of this article. 
+
+The backward pass takes this list of most likely tokens ending at each position to decode the sequence starting from the end and building its way back to the beginning.
+
+<a name="viterbi-backward"></a>
+{% include pseudocode.html id="1" code="
+\begin{algorithm}
+\caption{Backward pass}
+\begin{algorithmic}
+\PROCEDURE{Backward}{$input$, $best\:ending\:subtokens$}
+    \STATE $end$ = \CALL{Len}{$input$}
+    \STATE $subtokens$ = []
+    \WHILE{$end > 0$}
+        \STATE $best\:token$ = $best\:ending\:subtokens[end]$
+        \STATE \CALL{Push}{$subtokens$, $best\:token$}
+        \STATE $end$ = $end$ - \CALL{Len}{$best\:token$}
+    \ENDWHILE
+    \RETURN \CALL{Reverse}{$subtokens$}
+\ENDPROCEDURE
+\end{algorithmic}
+\end{algorithm}
+" %}
+
 
 ### Example 
 The illustrations are heavily inspired by another recommended read on the SentencePiece unigram algorithm by [Kyle Chung](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html). Let's take the following example word to tokenize. : 
@@ -99,30 +120,30 @@ The following will walk through two implementations of the algorithm in Rust.
 
 # First implementation
 
-As a reminder the forward pass of the algorithm requires identifying the most likely token at each character position of the input:
+As a reminder the [forward pass](#viterbi-forward) of the algorithm requires identifying the most likely token at each character position of the input. One potential implementation of the _BestPrefix_ method is to take slices of the substring ending at `end_idx` with incremental start position and calculating the likelihood for each slice. This results in a nested `for` loop to generate these slices. For each slice, the log probability or the token is equal to the log probability of the slice itself added to the probability of the best sequence leading to it. To implement this Viterbi algorithm the best slices and best scores are stored for each ending position and can be re-used to populate the most likely tokens ending at subsequent positions. This is the proposed implementation by [Kyle Chung](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html): 
 
-~~~
-1. initialize best_ending_subtokens = [None] * len(input)
-1. For end_idx in [0:len(input)]:
-    best_ending_subtokens[end_idx] = identify_best_token_ending_at(end_idx)
-~~~
-
-One potential implementation of the `identify_best_token_ending_at` method is to take slices of the substring ending at `end_idx` with incremental start position and calculating the likelihood for each slice. This results in a nested `for` loop to generate these slices. For each slice, the log probability or the token is equal to the log probability of the slice itself added to the probability of the best sequence leading to it. To implement this Viterbi algorithm the best slices and best scores are stored for each ending position and can be re-used to populate the most likely tokens ending at subsequent positions. This is the proposed implementation by [Kyle Chung](https://everdark.github.io/k9/notebooks/ml/natural_language_understanding/subword_units/subword_units.nb.html): 
-
-~~~
-1. initialize best_ending_subtokens = [None] * len(input)
-2. initialize best_ending_subtokens_scores = -inf * len(input)
-2. For end_idx in [0:len(input)]:
-        For start_idx in [0:end_idx]:
-            substring = input[start_idx:end_idx]
-            local_score = best_ending_subtokens_scores[start_idx] + score(input[start_idx:end_idx])
-            If local_score > best_ending_subtokens_scores[end_idx]:
-                best_ending_subtokens[end_idx] = substring
-                best_ending_subtokens_scores[end_idx] = local_score
-            End if
-        End for
-    End for
-~~~
+{% include pseudocode.html id="2" code="
+\begin{algorithm}
+\caption{Forward pass (nested loops)}
+\begin{algorithmic}
+\PROCEDURE{Forward}{$input$, $scores$}
+    \STATE $best\:ending\:subtokens$ = [nil] * \CALL{Len}{$input$}
+    \STATE $best\:ending\:scores$ = [$-\infty$] * \CALL{Len}{$input$}
+    \FOR{$end = 0$ \TO $len(input)$}
+        \FOR{$start = 0$ \TO $end$}
+            \STATE $substring$ = $input[start..end]$
+            \STATE $score_{local}$ = $best\:ending\:scores[start]$ + $scores[substring]$
+            \IF{$score_{local}$ > $best\:ending\:scores[end]$}
+                \STATE $best\:ending\:subtokens[end]$ = $substring$
+                \STATE $best\:ending\:scores[end]$ = $score_{local}$
+            \ENDIF            
+        \ENDFOR
+    \ENDFOR    
+    \RETURN ($best\:ending\:subtokens$)
+\ENDPROCEDURE
+\end{algorithmic}
+\end{algorithm}
+" %}
 
 The first step is to define a SentencePiece model holding the pre-trained vocabulary and tokens log-likelihood:
 
@@ -300,21 +321,29 @@ By asking for all DAG nodes sharing a prefix with "carpooling", we'd obtain the 
 
 The Viterbi forward pass can be re-written to take advantage of this efficient way of recovering tokens sharing a common prefix:
 
-~~~
-1. initialize best_ending_subtokens = [None] * len(input)
-2. initialize best_ending_subtokens_scores = -inf * len(input)
-2. For start_idx in [0:len(input)]:
-        substring = input[start_idx:]
-        matches = find_common_prefix(substring)
-        For match in matches:
-            local_score = best_ending_subtokens_scores[start_idx] + match.score
-            If local_score > best_ending_subtokens_scores[end_idx]:
-                best_ending_subtokens[end_idx] = substring
-                best_ending_subtokens_scores[end_idx] = local_score
-            End if
-        End for
-    End for
-~~~
+{% include pseudocode.html id="3" code="
+\begin{algorithm}
+\caption{Forward pass (common prefix)}
+\begin{algorithmic}
+\PROCEDURE{Forward}{$input$, $scores$}
+    \STATE $best\:ending\:subtokens$ = [nil] * \CALL{Len}{$input$}
+    \STATE $best\:ending\:scores$ = [$-\infty$] * \CALL{Len}{$input$}
+    \FOR{$end = 0$ \TO $len(input)$}
+        \STATE $substring$ = $input[start..]$
+        \STATE $matches$ = \CALL{FindCommonPrefix}{$substring$, $scores$}
+        \FOR{$match$ in $matches$}
+            \STATE $score_{local}$ = $best\:ending\:scores[start]$ + $match.score$
+            \IF{$score_{local}$ > $best\:ending\:scores[end]$}
+                \STATE $best\:ending\:subtokens[end]$ = $substring$
+                \STATE $best\:ending\:scores[end]$ = $score_{local}$
+            \ENDIF
+        \ENDFOR
+    \ENDFOR    
+    \RETURN ($best\:ending\:subtokens$)
+\ENDPROCEDURE
+\end{algorithmic}
+\end{algorithm}
+" %}
 
 The nested `for` loop over the length of the input has been replaced by the more effective `find_common_prefix` illustrated above that depends on the DAG depth. The decoding algorithm remains identical.
 
